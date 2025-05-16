@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Results - NBKRIST Student Portal</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            padding-bottom: 40px;
+        }
+        .container {
+            max-width: 960px;
+        }
+        .header {
+            margin-bottom: 30px;
+        }
+        .results-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .log-container {
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: #212529;
+            color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        .log-entry {
+            margin: 0;
+            padding: 2px 0;
+            border-bottom: 1px solid #343a40;
+        }
+        .script-result {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #fff;
+            border: 1px solid #dee2e6;
+        }
+        .status-badge {
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1>Job Results</h1>
+                <div>
+                    <a href="/status/{{ job.id }}" class="btn btn-outline-primary me-2">View Full Logs</a>
+                    <a href="/" class="btn btn-outline-secondary">Back to Home</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="results-section">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3>Job #{{ job.id[:8] }}</h3>
+                <span class="status-badge badge 
+                    {% if job.status.value == 'completed' %}bg-success
+                    {% elif job.status.value == 'failed' %}bg-danger
+                    {% elif job.status.value == 'cancelled' %}bg-warning
+                    {% else %}bg-primary{% endif %}">
+                    {{ job.status.value }}
+                </span>
+            </div>
+
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <p><strong>Start Time:</strong> {{ job.start_time }}</p>
+                    <p><strong>End Time:</strong> {{ job.end_time }}</p>
+                    <p><strong>Duration:</strong> {{ (job.end_time - job.start_time).total_seconds() // 60 }} minutes</p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Academic Year:</strong> {{ job.params.get('academic_year', 'N/A') }}</p>
+                    <p><strong>Semester:</strong> {{ job.params.get('semester', 'N/A') }}</p>
+                    <p><strong>Branch:</strong> {{ job.params.get('branch', 'N/A') }}</p>
+                    <p><strong>Section:</strong> {{ job.params.get('section', 'N/A') }}</p>
+                </div>
+            </div>
+
+            <h4>Scripts Executed</h4>
+            <div class="script-results">
+                {% for script in job.scripts %}
+                <div class="script-result">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5>{{ script }}</h5>
+                        <span class="badge {% if script in job.results and job.results[script].get('success', False) %}bg-success{% else %}bg-danger{% endif %}">
+                            {% if script in job.results and job.results[script].get('success', False) %}Success{% else %}Failed{% endif %}
+                        </span>
+                    </div>
+                    
+                    {% if script in job.results %}
+                        {% if job.results[script].get('data_count') %}
+                        <p><strong>Records Processed:</strong> {{ job.results[script].get('data_count') }}</p>
+                        {% endif %}
+                        
+                        {% if job.results[script].get('files_uploaded') %}
+                        <p><strong>Files Uploaded:</strong> {{ job.results[script].get('files_uploaded') }}</p>
+                        {% endif %}
+                        
+                        {% if job.results[script].get('message') %}
+                        <p><strong>Message:</strong> {{ job.results[script].get('message') }}</p>
+                        {% endif %}
+                    {% else %}
+                        <p class="text-muted">No detailed results available</p>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="mt-4">
+                <h4>Summary</h4>
+                <p>
+                    {% if job.status.value == 'completed' %}
+                    All scripts completed successfully. The data has been processed and uploaded to Supabase.
+                    {% elif job.status.value == 'failed' %}
+                    Job failed during execution. Please check the logs for details.
+                    {% elif job.status.value == 'cancelled' %}
+                    Job was cancelled before completion.
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <h3>Recent Logs</h3>
+            <div class="log-container">
+                {% for log in job.logs[-50:] %}
+                <p class="log-entry">{{ log }}</p>
+                {% endfor %}
+            </div>
+            <div class="text-center mt-2">
+                <a href="/status/{{ job.id }}" class="btn btn-outline-primary">View Full Logs</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+services:
+  # Web service for the Flask application
+  - type: web
+    name: nbkrist-student-portal
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: student-details
+    healthCheckPath: /
+    # Free instance type
+    plan: free
+    disk:
+      name: student-data
+      mountPath: /tmp/student_details
+      sizeGB: 1
+
+# Specify Python version
+buildEnv:
+  PYTHON_VERSION: 3.9.0

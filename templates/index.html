@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBKRIST Student Portal - Data Scraper</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            padding-bottom: 40px;
+        }
+        .container {
+            max-width: 960px;
+        }
+        .header {
+            margin-bottom: 30px;
+        }
+        .form-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .job-section {
+            margin-top: 30px;
+        }
+        .script-option {
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+        }
+        .script-option:hover {
+            background-color: #f1f3f5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header text-center">
+            <h1>NBKRIST Student Portal - Data Scraper</h1>
+            <p class="lead">Run scraper scripts and upload data to Supabase</p>
+        </div>
+
+        <div class="form-section">
+            <form action="/submit" method="post">
+                <h3>Login Details</h3>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" name="username" placeholder="Enter username">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" placeholder="Enter password">
+                    </div>
+                </div>
+
+                <h3>Academic Details</h3>
+                <div class="row mb-3">
+                    <div class="col-md-12">
+                        <label for="academic_year" class="form-label">Academic Year</label>
+                        <select class="form-select" id="academic_year" name="academic_year">
+                            {% for year in academic_years %}
+                            <option value="{{ year }}">{{ year }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <!-- Hidden fields with default values -->
+                <input type="hidden" name="semester" value="{{ semesters[0] }}">
+                <input type="hidden" name="branch" value="{{ branches[0] }}">
+                <input type="hidden" name="section" value="{{ sections[0] }}">
+
+                <h3>Select Scripts to Run</h3>
+                <p class="text-muted">Scripts will run sequentially in the order selected</p>
+
+                <div class="script-options">
+                    <div class="script-option">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="attendance_scraper.py" id="attendance_scraper" name="scripts">
+                            <label class="form-check-label" for="attendance_scraper">
+                                <strong>Attendance Scraper</strong>
+                            </label>
+                        </div>
+                        <p class="text-muted">Scrapes attendance data for the selected academic details</p>
+                    </div>
+
+                    <div class="script-option">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="mid_marks_scraper.py" id="mid_marks_scraper" name="scripts">
+                            <label class="form-check-label" for="mid_marks_scraper">
+                                <strong>Mid Marks Scraper</strong>
+                            </label>
+                        </div>
+                        <p class="text-muted">Scrapes mid-term marks data for the selected academic details</p>
+                    </div>
+
+                    <div class="script-option">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="personal_details_scraper.py" id="personal_details_scraper" name="scripts">
+                            <label class="form-check-label" for="personal_details_scraper">
+                                <strong>Personal Details Scraper</strong>
+                            </label>
+                        </div>
+                        <p class="text-muted">Scrapes personal details for the selected academic details</p>
+                    </div>
+
+                    <div class="script-option">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="direct_supabase_uploader.py" id="upload_to_supabase" name="scripts">
+                            <label class="form-check-label" for="upload_to_supabase">
+                                <strong>Upload to Supabase</strong>
+                            </label>
+                        </div>
+                        <p class="text-muted">Uploads scraped data to Supabase Storage</p>
+                    </div>
+
+
+                </div>
+
+                <div class="d-grid gap-2 mt-4">
+                    <button type="submit" class="btn btn-primary">Run Selected Scripts</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="job-section">
+            <h3>Active Jobs</h3>
+            {% if active_jobs %}
+                <div class="list-group mb-4">
+                    {% for job in active_jobs %}
+                        <a href="/status/{{ job.id }}" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h5 class="mb-1">Job #{{ job.id[:8] }}</h5>
+                                <small>{{ job.start_time }}</small>
+                            </div>
+                            <p class="mb-1">Status: {{ job.status }}</p>
+                            <div class="progress">
+                                <div class="progress-bar" role="progressbar" style="width: {{ job.progress }}%;" aria-valuenow="{{ job.progress }}" aria-valuemin="0" aria-valuemax="100">{{ job.progress }}%</div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-muted">No active jobs</p>
+            {% endif %}
+
+            <h3>Recent Jobs</h3>
+            {% if completed_jobs %}
+                <div class="list-group">
+                    {% for job in completed_jobs %}
+                        <a href="/status/{{ job.id }}" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h5 class="mb-1">Job #{{ job.id[:8] }}</h5>
+                                <small>{{ job.end_time }}</small>
+                            </div>
+                            <p class="mb-1">Status: {{ job.status }}</p>
+                            <p class="mb-1">Scripts: {{ job.scripts|join(', ') }}</p>
+                        </a>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="text-muted">No completed jobs</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

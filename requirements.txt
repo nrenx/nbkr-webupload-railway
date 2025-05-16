@@ -1,0 +1,27 @@
+# Web scraping and data processing
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+selenium>=4.10.0
+webdriver-manager>=4.0.0
+# pandas is optional for data export functionality
+# Uncomment if needed
+# pandas>=1.5.3
+
+# Supabase dependencies
+supabase>=1.0.3,<3.0.0
+httpx>=0.24.0
+
+# Asynchronous operations
+aiohttp>=3.8.0
+
+# Progress bar
+tqdm==4.66.1
+
+# Web application
+flask>=2.0.0
+gunicorn>=20.1.0
+Werkzeug>=2.0.0
+
+# For job management
+python-dotenv>=0.19.0

@@ -1,0 +1,46 @@
+# Git files
+.git/
+.gitignore
+
+# Documentation
+README.md
+CONTRIBUTING.md
+LICENSE
+docs/
+
+# Test files
+test_*.py
+*_test.py
+tests/
+test_script.py
+
+# Development files
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary data directories
+/tmp/
+/temp/
+/student_details/
+
+# Local data that shouldn't be deployed
+/csv_details/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
