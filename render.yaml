@@ -3,7 +3,7 @@ services:
     name: nbkrist-student-portal
     env: python
     buildCommand: "./render-build.sh"
-    startCommand: "gunicorn app:app --bind 0.0.0.0:10000"
+    startCommand: "python -m playwright install chromium && gunicorn app:app --bind 0.0.0.0:10000"
     plan: free
     envVars:
       - key: PYTHON_VERSION
