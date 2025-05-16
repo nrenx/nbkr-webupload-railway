@@ -4,39 +4,103 @@ services:
     name: nbkrist-student-portal
     env: python
     buildCommand: |
-      # Install Chrome for web scraping
+      # Install Chrome for web scraping - optimized approach
       apt-get update
-      apt-get install -y wget gnupg
-      wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
-      apt-get update
-      apt-get install -y google-chrome-stable
+      apt-get install -y wget gnupg apt-transport-https ca-certificates curl
+
+      # Check if Chrome is already installed
+      if ! dpkg-query -W -f='${Status}' google-chrome-stable 2>/dev/null | grep -q "install ok installed"; then
+        echo "Chrome not installed. Installing now..."
+        # Download and install Chrome directly
+        wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        apt-get install -y ./google-chrome-stable_current_amd64.deb
+        rm google-chrome-stable_current_amd64.deb
+        echo "Chrome installation completed."
+      else
+        echo "Chrome is already installed. Skipping installation."
+      fi
+
+      # Install Chrome dependencies (will only install missing ones)
+      apt-get install -y --no-install-recommends libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libx11-xcb1 libxcb-dri3-0 libxss1 libxtst6 xdg-utils fonts-liberation
+
       # Verify Chrome installation
-      google-chrome-stable --version
+      echo "Verifying Chrome installation:"
+      which google-chrome-stable || echo "Chrome not found in PATH"
+      google-chrome-stable --version || echo "Failed to get Chrome version"
+
       # Create symlinks to ensure Chrome is found in standard locations
+      echo "Creating Chrome symlinks..."
+      mkdir -p /usr/local/bin
       ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chrome
       ln -sf /usr/bin/google-chrome-stable /usr/local/bin/google-chrome
+
       # Make sure Chrome is executable
-      chmod +x /usr/bin/google-chrome-stable
-      chmod +x /usr/local/bin/chrome
-      chmod +x /usr/local/bin/google-chrome
-      # Install Chrome dependencies
-      apt-get install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
+      echo "Setting executable permissions..."
+      chmod +x /usr/bin/google-chrome-stable 2>/dev/null || echo "Note: Failed to make Chrome executable (may already be executable)"
+      chmod +x /usr/local/bin/chrome 2>/dev/null || echo "Note: Failed to make Chrome symlink executable (may already be executable)"
+      chmod +x /usr/local/bin/google-chrome 2>/dev/null || echo "Note: Failed to make Chrome symlink executable (may already be executable)"
+
+      # Create a directory for Chrome if it doesn't exist
+      mkdir -p /opt/google/chrome
+      ln -sf /usr/bin/google-chrome-stable /opt/google/chrome/chrome
+      chmod +x /opt/google/chrome/chrome 2>/dev/null || echo "Note: Failed to make Chrome symlink executable (may already be executable)"
+
+      # Print Chrome installation details
+      echo "Chrome installation details:"
+      dpkg -l | grep chrome
+      ls -la /usr/bin/google-chrome* 2>/dev/null || echo "No Chrome executables found in /usr/bin/"
+      ls -la /usr/local/bin/chrome* 2>/dev/null || echo "No Chrome executables found in /usr/local/bin/"
+      ls -la /opt/google/chrome/ 2>/dev/null || echo "No Chrome executables found in /opt/google/chrome/"
       # Install Python dependencies
       pip install -r requirements.txt
+
       # Install Playwright with all dependencies
+      echo "Installing Playwright..."
       pip install playwright
-      python -m playwright install --with-deps chromium
+
+      # Set Playwright browsers path explicitly and make it persistent
+      echo "Setting Playwright browsers path..."
+      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright
+      echo "export PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright" >> ~/.bashrc
+
+      # Check if Playwright browsers directory exists
+      if [ ! -d "/opt/render/.cache/ms-playwright/chromium_headless_shell-1169" ]; then
+        echo "Playwright browsers not found. Installing Playwright browsers..."
+        # Install Playwright browsers with dependencies
+        python -m playwright install --with-deps chromium
+      else
+        echo "Playwright browsers directory already exists. Skipping installation."
+      fi
+
+      # Make sure Playwright browsers are executable
+      echo "Setting executable permissions for Playwright browsers..."
+      find /opt/render/.cache/ms-playwright -type f -name "chrome*" -exec chmod +x {} \; 2>/dev/null || echo "No chrome* files found"
+      find /opt/render/.cache/ms-playwright -type f -name "headless_shell" -exec chmod +x {} \; 2>/dev/null || echo "No headless_shell files found"
+
+      # Create a symlink from system Chrome to Playwright's expected location
+      echo "Creating symlink from system Chrome to Playwright's expected location..."
+      mkdir -p /opt/render/.cache/ms-playwright/chromium_headless_shell-1169/chrome-linux/
+      ln -sf /usr/bin/google-chrome-stable /opt/render/.cache/ms-playwright/chromium_headless_shell-1169/chrome-linux/headless_shell
+      chmod +x /opt/render/.cache/ms-playwright/chromium_headless_shell-1169/chrome-linux/headless_shell 2>/dev/null || echo "Note: Failed to make headless_shell symlink executable (may already be executable)"
+
+      # Verify the symlink
+      echo "Verifying the symlink:"
+      ls -la /opt/render/.cache/ms-playwright/chromium_headless_shell-1169/chrome-linux/headless_shell 2>/dev/null || echo "Symlink not found"
+
       # Verify Playwright installation
       python -c "from playwright.sync_api import sync_playwright; print('Playwright installation verified')"
-      # Install Playwright browsers explicitly
-      PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright python -m playwright install chromium
-      # Make sure Playwright browsers are executable
-      find /opt/render/.cache/ms-playwright -type f -name "chrome*" -exec chmod +x {} \;
-      # Create a simple script to check Chrome paths
+
+      # Create a script to check browser paths
       echo '#!/usr/bin/env python3
 import os
 import sys
+import subprocess
+from pathlib import Path
+
+print("=== BROWSER INSTALLATION VERIFICATION ===")
+print("\n1. Checking Chrome installation:")
+
+# Check system Chrome
 chrome_paths = [
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
@@ -44,14 +108,103 @@ chrome_paths = [
     "/usr/local/bin/google-chrome",
     "/opt/google/chrome/chrome"
 ]
-print("Checking Chrome paths:")
+
 for path in chrome_paths:
     exists = os.path.exists(path)
-    print(f"{path}: {'EXISTS' if exists else 'NOT FOUND'}")
+    is_executable = os.access(path, os.X_OK) if exists else False
+    print(f"{path}: {'EXISTS' if exists else 'NOT FOUND'} {'(executable)' if is_executable else '(not executable)' if exists else ''}")
+
+# Try to run Chrome
+print("\n2. Trying to run Chrome:")
+try:
+    result = subprocess.run(["google-chrome-stable", "--version"],
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,
+                           text=True,
+                           timeout=5)
+    print(f"Chrome version: {result.stdout.strip()}")
+    if result.stderr:
+        print(f"Chrome stderr: {result.stderr.strip()}")
+except Exception as e:
+    print(f"Error running Chrome: {e}")
+
+# Check Playwright browsers
+print("\n3. Checking Playwright installation:")
+playwright_path = Path("/opt/render/.cache/ms-playwright")
+if playwright_path.exists():
+    print(f"Playwright directory exists at {playwright_path}")
+
+    # List all directories
+    print("\nPlaywright directories:")
+    for item in playwright_path.iterdir():
+        if item.is_dir():
+            print(f"  {item.name}/")
+
+    # Check for headless_shell specifically
+    print("\nSearching for headless_shell:")
+    headless_shell_paths = list(playwright_path.glob("**/headless_shell"))
+    if headless_shell_paths:
+        for path in headless_shell_paths:
+            exists = os.path.exists(path)
+            is_executable = os.access(path, os.X_OK) if exists else False
+            print(f"  {path}: {'EXISTS' if exists else 'NOT FOUND'} {'(executable)' if is_executable else '(not executable)' if exists else ''}")
+    else:
+        print("  No headless_shell found in Playwright directories")
+
+    # Check our custom symlink
+    custom_path = Path("/opt/render/.cache/ms-playwright/chromium_headless_shell-1169/chrome-linux/headless_shell")
+    if custom_path.exists():
+        is_executable = os.access(custom_path, os.X_OK)
+        is_symlink = os.path.islink(str(custom_path))
+        target = os.readlink(str(custom_path)) if is_symlink else "Not a symlink"
+        print(f"\nCustom symlink: {custom_path}")
+        print(f"  Exists: {'Yes' if custom_path.exists() else 'No'}")
+        print(f"  Is executable: {'Yes' if is_executable else 'No'}")
+        print(f"  Is symlink: {'Yes' if is_symlink else 'No'}")
+        print(f"  Target: {target}")
+    else:
+        print(f"\nCustom symlink {custom_path} does not exist")
+else:
+    print(f"Playwright directory NOT FOUND at {playwright_path}")
+
+# Try to run Playwright
+print("\n4. Trying to initialize Playwright:")
+try:
+    code = """
+from playwright.sync_api import sync_playwright
+print("Importing Playwright: Success")
+try:
+    p = sync_playwright().start()
+    print("Starting Playwright: Success")
+    try:
+        browser = p.chromium.launch(headless=True)
+        print("Launching browser: Success")
+        browser.close()
+    except Exception as e:
+        print(f"Launching browser: Failed - {e}")
+    finally:
+        p.stop()
+        print("Stopping Playwright: Success")
+except Exception as e:
+    print(f"Starting Playwright: Failed - {e}")
+"""
+    result = subprocess.run([sys.executable, "-c", code],
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,
+                           text=True,
+                           timeout=15)
+    print(result.stdout.strip())
+    if result.stderr:
+        print(f"Stderr: {result.stderr.strip()}")
+except Exception as e:
+    print(f"Error testing Playwright: {e}")
+
+print("\n=== VERIFICATION COMPLETE ===")
 sys.exit(0)
-' > /tmp/check_chrome.py
-      # Run the script to check Chrome paths
-      python /tmp/check_chrome.py
+' > /tmp/check_browsers.py
+
+      # Run the script to check browser paths
+      python /tmp/check_browsers.py
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
