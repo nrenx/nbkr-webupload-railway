@@ -98,6 +98,12 @@ class TaskMaster:
         self.worker_thread = threading.Thread(target=self._worker, daemon=True)
         self.worker_thread.start()
         self.lock = threading.Lock()
+        self.last_worker_activity = time.time()
+
+        # Start a thread to monitor worker health
+        self.monitor_thread = threading.Thread(target=self._monitor_worker_health, daemon=True)
+        self.monitor_thread.start()
+        logger.info("TaskMaster initialized with worker and monitor threads")
 
     def create_job(self, scripts: List[str], params: Dict[str, Any]) -> Job:
         """Create a new job.
@@ -211,20 +217,119 @@ class TaskMaster:
             completed.sort(key=lambda j: j.end_time if j.end_time else datetime.min, reverse=True)
             return completed[:limit]
 
+    def get_worker_status(self) -> Dict[str, Any]:
+        """Get the status of the worker thread.
+
+        Returns:
+            Dictionary with worker thread status information
+        """
+        with self.lock:
+            current_time = time.time()
+            last_activity_seconds_ago = current_time - self.last_worker_activity
+
+            return {
+                "worker_alive": self.worker_thread.is_alive(),
+                "monitor_alive": self.monitor_thread.is_alive(),
+                "last_activity_seconds_ago": int(last_activity_seconds_ago),
+                "active_job": self.active_job,
+                "pending_jobs_count": len([job for job in self.jobs.values()
+                                         if job.status == JobStatus.PENDING]),
+                "queue_size": self.job_queue.qsize(),
+                "queue_empty": self.job_queue.empty()
+            }
+
+    def restart_worker(self) -> Dict[str, Any]:
+        """Restart the worker thread.
+
+        Returns:
+            Dictionary with restart status information
+        """
+        with self.lock:
+            # If there's an active job, mark it as failed
+            if self.active_job:
+                job = self.jobs.get(self.active_job)
+                if job and job.status == JobStatus.RUNNING:
+                    job.status = JobStatus.FAILED
+                    job.add_log("Job failed due to worker restart")
+                    job.end_time = datetime.now()
+                    logger.warning(f"Marked job {self.active_job} as failed due to worker restart")
+                self.active_job = None
+
+            # Create a new worker thread
+            old_thread_alive = self.worker_thread.is_alive()
+            self.worker_thread = threading.Thread(target=self._worker, daemon=True)
+            self.worker_thread.start()
+            self.last_worker_activity = time.time()
+
+            logger.warning("Worker thread restarted manually")
+
+            return {
+                "success": True,
+                "old_thread_alive": old_thread_alive,
+                "new_thread_alive": self.worker_thread.is_alive(),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def _monitor_worker_health(self):
+        """Monitor the health of the worker thread and restart it if necessary."""
+        while True:
+            try:
+                # Check if the worker thread is alive
+                if not self.worker_thread.is_alive():
+                    logger.error("Worker thread is not alive, restarting it")
+                    self.worker_thread = threading.Thread(target=self._worker, daemon=True)
+                    self.worker_thread.start()
+
+                # Check if the worker thread is stuck (no activity for 5 minutes)
+                current_time = time.time()
+                if current_time - self.last_worker_activity > 300:  # 5 minutes
+                    logger.warning("Worker thread appears to be stuck, checking queue")
+                    # If there are pending jobs but the worker is inactive, log this
+                    with self.lock:
+                        pending_jobs = [job_id for job_id, job in self.jobs.items()
+                                      if job.status == JobStatus.PENDING]
+                        if pending_jobs and not self.active_job:
+                            logger.error(f"Worker thread is stuck with pending jobs: {pending_jobs}")
+                            # We can't safely restart the thread if it's still alive,
+                            # but we can log this condition for monitoring
+
+                # Sleep for 60 seconds before checking again
+                time.sleep(60)
+            except Exception as e:
+                logger.error(f"Error in monitor thread: {e}")
+                import traceback
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+                time.sleep(60)  # Sleep for 60 seconds before trying again
+
     def _worker(self):
         """Worker thread that processes jobs from the queue."""
         while True:
             try:
-                # Get the next job from the queue
-                job_id = self.job_queue.get()
+                # Update the last activity timestamp
+                self.last_worker_activity = time.time()
+
+                # Get the next job from the queue with a timeout
+                # This ensures the thread doesn't block indefinitely
+                try:
+                    job_id = self.job_queue.get(timeout=60)  # 60 second timeout
+                except Exception as queue_error:
+                    logger.info(f"Job queue empty or timed out: {queue_error}")
+                    time.sleep(5)  # Sleep for 5 seconds before checking again
+                    continue
+
+                # Update the last activity timestamp after getting a job
+                self.last_worker_activity = time.time()
+                logger.info(f"Worker thread processing job: {job_id}")
 
                 with self.lock:
                     if job_id not in self.jobs:
+                        logger.warning(f"Job {job_id} not found in jobs dictionary")
                         self.job_queue.task_done()
                         continue
 
                     job = self.jobs[job_id]
                     if job.status != JobStatus.PENDING:
+                        logger.warning(f"Job {job_id} not in PENDING state: {job.status}")
                         self.job_queue.task_done()
                         continue
 
@@ -233,39 +338,77 @@ class TaskMaster:
                     job.start_time = datetime.now()
                     job.add_log("Job started")
                     self.active_job = job_id
+                    logger.info(f"Job {job_id} marked as RUNNING")
 
                 # Process each script in sequence
                 success = True
                 for i, script_name in enumerate(job.scripts):
+                    # Update activity timestamp
+                    self.last_worker_activity = time.time()
+
                     job.current_script = script_name
                     job.progress = int((i / len(job.scripts)) * 100)
                     job.add_log(f"Running script: {script_name}")
+                    logger.info(f"Job {job_id} running script: {script_name}")
 
                     # Run the script
                     script_success = self._run_script(job, script_name)
 
+                    # Update activity timestamp after script execution
+                    self.last_worker_activity = time.time()
+
                     if not script_success:
+                        logger.warning(f"Job {job_id} script {script_name} failed")
                         success = False
                         break
 
                 # Mark the job as completed or failed
                 with self.lock:
+                    # Update activity timestamp
+                    self.last_worker_activity = time.time()
+
                     job.end_time = datetime.now()
                     if success:
                         job.status = JobStatus.COMPLETED
                         job.progress = 100
                         job.add_log("Job completed successfully")
+                        logger.info(f"Job {job_id} completed successfully")
                     else:
                         job.status = JobStatus.FAILED
                         job.add_log("Job failed")
+                        logger.info(f"Job {job_id} failed")
 
                     self.active_job = None
 
                 self.job_queue.task_done()
 
+                # Final activity timestamp update
+                self.last_worker_activity = time.time()
+
             except Exception as e:
+                # Update activity timestamp even on error
+                self.last_worker_activity = time.time()
+
                 logger.error(f"Error in worker thread: {e}")
-                time.sleep(1)  # Avoid tight loop in case of persistent errors
+                # Log the full stack trace for better debugging
+                import traceback
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+
+                # If there was an active job, mark it as failed
+                if self.active_job:
+                    try:
+                        with self.lock:
+                            job = self.jobs.get(self.active_job)
+                            if job and job.status == JobStatus.RUNNING:
+                                job.status = JobStatus.FAILED
+                                job.add_log(f"Job failed due to worker error: {e}")
+                                job.end_time = datetime.now()
+                                logger.error(f"Marked job {self.active_job} as failed due to worker error")
+                            self.active_job = None
+                    except Exception as mark_error:
+                        logger.error(f"Error marking job as failed: {mark_error}")
+
+                time.sleep(5)  # Avoid tight loop in case of persistent errors
 
     def _run_script(self, job: Job, script_name: str) -> bool:
         """Run a script for a job.

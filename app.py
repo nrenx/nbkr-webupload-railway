@@ -141,6 +141,16 @@ def api_jobs():
         "completed_jobs": [job.to_dict() for job in completed_jobs],
     })
 
+@app.route('/api/worker-status')
+def api_worker_status():
+    """API endpoint to get the status of the worker thread."""
+    return jsonify(task_master.get_worker_status())
+
+@app.route('/api/restart-worker', methods=['POST'])
+def api_restart_worker():
+    """API endpoint to restart the worker thread."""
+    return jsonify(task_master.restart_worker())
+
 @app.route('/cancel/<job_id>', methods=['POST'])
 def cancel_job(job_id):
     """Cancel a running job."""

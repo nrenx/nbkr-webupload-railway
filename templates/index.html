@@ -41,6 +41,9 @@
         <div class="header text-center">
             <h1>NBKRIST Student Portal - Data Scraper</h1>
             <p class="lead">Run scraper scripts and upload data to Supabase</p>
+            <div class="mt-2">
+                <a href="#" id="checkWorkerStatus" class="btn btn-sm btn-outline-info">Check Worker Status</a>
+            </div>
         </div>
 
         <div class="form-section">
@@ -168,5 +171,115 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Worker status check
+        document.getElementById('checkWorkerStatus').addEventListener('click', function(e) {
+            e.preventDefault();
+
+            fetch('/api/worker-status')
+                .then(response => response.json())
+                .then(data => {
+                    // Create a modal to display the worker status
+                    const modalHtml = `
+                        <div class="modal fade" id="workerStatusModal" tabindex="-1" aria-labelledby="workerStatusModalLabel" aria-hidden="true">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="workerStatusModalLabel">Worker Thread Status</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <table class="table">
+                                            <tbody>
+                                                <tr>
+                                                    <th>Worker Thread Alive</th>
+                                                    <td>${data.worker_alive ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>'}</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Monitor Thread Alive</th>
+                                                    <td>${data.monitor_alive ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>'}</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Last Activity</th>
+                                                    <td>${data.last_activity_seconds_ago} seconds ago</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Active Job</th>
+                                                    <td>${data.active_job || 'None'}</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Pending Jobs</th>
+                                                    <td>${data.pending_jobs_count}</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Queue Size</th>
+                                                    <td>${data.queue_size}</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Queue Empty</th>
+                                                    <td>${data.queue_empty ? 'Yes' : 'No'}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-danger" id="restartWorkerBtn">Restart Worker Thread</button>
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    // Add the modal to the document
+                    const modalContainer = document.createElement('div');
+                    modalContainer.innerHTML = modalHtml;
+                    document.body.appendChild(modalContainer);
+
+                    // Show the modal
+                    const modal = new bootstrap.Modal(document.getElementById('workerStatusModal'));
+                    modal.show();
+
+                    // Remove the modal from the DOM when it's hidden
+                    document.getElementById('workerStatusModal').addEventListener('hidden.bs.modal', function() {
+                        document.body.removeChild(modalContainer);
+                    });
+
+                    // Add event listener for the restart button
+                    document.getElementById('restartWorkerBtn').addEventListener('click', function() {
+                        if (confirm('Are you sure you want to restart the worker thread? Any running job will be marked as failed.')) {
+                            fetch('/api/restart-worker', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                }
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    alert('Worker thread restarted successfully!');
+                                    // Close the current modal
+                                    bootstrap.Modal.getInstance(document.getElementById('workerStatusModal')).hide();
+                                    // Refresh the page to reflect the changes
+                                    setTimeout(() => {
+                                        window.location.reload();
+                                    }, 1000);
+                                } else {
+                                    alert('Failed to restart worker thread: ' + data.error);
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Error restarting worker thread:', error);
+                                alert('Error restarting worker thread. See console for details.');
+                            });
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching worker status:', error);
+                    alert('Error fetching worker status. See console for details.');
+                });
+        });
+    </script>
 </body>
 </html>
