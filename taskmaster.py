@@ -99,11 +99,18 @@ class TaskMaster:
         self.worker_thread.start()
         self.lock = threading.Lock()
         self.last_worker_activity = time.time()
+        self.last_monitor_activity = time.time()
+        self.last_supervisor_activity = time.time()
 
         # Start a thread to monitor worker health
         self.monitor_thread = threading.Thread(target=self._monitor_worker_health, daemon=True)
         self.monitor_thread.start()
-        logger.info("TaskMaster initialized with worker and monitor threads")
+
+        # Start a supervisor thread to monitor both worker and monitor threads
+        self.supervisor_thread = threading.Thread(target=self._supervisor, daemon=True)
+        self.supervisor_thread.start()
+
+        logger.info("TaskMaster initialized with worker, monitor, and supervisor threads")
 
     def create_job(self, scripts: List[str], params: Dict[str, Any]) -> Job:
         """Create a new job.
@@ -225,12 +232,17 @@ class TaskMaster:
         """
         with self.lock:
             current_time = time.time()
-            last_activity_seconds_ago = current_time - self.last_worker_activity
+            last_worker_activity_seconds_ago = current_time - self.last_worker_activity
+            last_monitor_activity_seconds_ago = current_time - self.last_monitor_activity
+            last_supervisor_activity_seconds_ago = current_time - self.last_supervisor_activity
 
             return {
                 "worker_alive": self.worker_thread.is_alive(),
                 "monitor_alive": self.monitor_thread.is_alive(),
-                "last_activity_seconds_ago": int(last_activity_seconds_ago),
+                "supervisor_alive": self.supervisor_thread.is_alive(),
+                "last_worker_activity_seconds_ago": int(last_worker_activity_seconds_ago),
+                "last_monitor_activity_seconds_ago": int(last_monitor_activity_seconds_ago),
+                "last_supervisor_activity_seconds_ago": int(last_supervisor_activity_seconds_ago),
                 "active_job": self.active_job,
                 "pending_jobs_count": len([job for job in self.jobs.values()
                                          if job.status == JobStatus.PENDING]),
@@ -270,10 +282,61 @@ class TaskMaster:
                 "timestamp": datetime.now().isoformat()
             }
 
+    def restart_monitor(self) -> Dict[str, Any]:
+        """Restart the monitor thread.
+
+        Returns:
+            Dictionary with restart status information
+        """
+        with self.lock:
+            # Create a new monitor thread
+            old_thread_alive = self.monitor_thread.is_alive()
+            self.monitor_thread = threading.Thread(target=self._monitor_worker_health, daemon=True)
+            self.monitor_thread.start()
+            self.last_monitor_activity = time.time()
+
+            logger.warning("Monitor thread restarted manually")
+
+            return {
+                "success": True,
+                "old_thread_alive": old_thread_alive,
+                "new_thread_alive": self.monitor_thread.is_alive(),
+                "timestamp": datetime.now().isoformat()
+            }
+
+    def _supervisor(self):
+        """Supervisor thread that monitors both worker and monitor threads."""
+        while True:
+            try:
+                # Update the last activity timestamp
+                self.last_supervisor_activity = time.time()
+
+                # Check if the monitor thread is alive
+                if not self.monitor_thread.is_alive():
+                    logger.error("Monitor thread is not alive, restarting it")
+                    self.restart_monitor()
+
+                # Check if the worker thread is alive
+                if not self.worker_thread.is_alive():
+                    logger.error("Worker thread is not alive, supervisor is restarting it")
+                    self.restart_worker()
+
+                # Sleep for 30 seconds before checking again
+                # Shorter interval than monitor thread to ensure quick recovery
+                time.sleep(30)
+            except Exception as e:
+                logger.error(f"Error in supervisor thread: {e}")
+                import traceback
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+                time.sleep(30)  # Sleep for 30 seconds before trying again
+
     def _monitor_worker_health(self):
         """Monitor the health of the worker thread and restart it if necessary."""
         while True:
             try:
+                # Update the last activity timestamp
+                self.last_monitor_activity = time.time()
+
                 # Check if the worker thread is alive
                 if not self.worker_thread.is_alive():
                     logger.error("Worker thread is not alive, restarting it")

@@ -6,6 +6,7 @@ This script logs into the college portal and navigates to the personal details p
 It extracts personal details data and stores it in a structured format.
 """
 
+import os
 import sys
 import logging
 import argparse
@@ -170,16 +171,28 @@ class PersonalDetailsScraper:
             try:
                 logger.info(f"Initializing personal details scraper in {'headless' if headless else 'visible'} mode")
                 chrome_options = Options()
-                if headless:
-                    chrome_options.add_argument("--headless")
+
+                # Common options for both headless and non-headless mode
                 chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--disable-gpu")
                 chrome_options.add_argument("--no-sandbox")
                 chrome_options.add_argument("--disable-dev-shm-usage")
 
+                # Check if running on Render.com (environment detection)
+                is_render = os.environ.get('RENDER') == 'true'
+
+                if is_render:
+                    logger.info("Running on Render.com, using special Chrome configuration")
+                    # On Render, we need to specify the Chrome binary location
+                    chrome_options.binary_location = "/usr/bin/google-chrome-stable"
+                    # Always use headless mode on Render
+                    chrome_options.add_argument('--headless=new')
+                elif headless:
+                    chrome_options.add_argument('--headless=new')
+
                 # Initialize Chrome WebDriver
                 try:
-                    # Use webdriver_manager to get the correct driver and AVOID system ChromeDriver
+                    # First try: Use webdriver_manager to get the correct driver
                     if WEBDRIVER_MANAGER_AVAILABLE:
                         try:
                             # Get the latest ChromeDriver
@@ -190,22 +203,40 @@ class PersonalDetailsScraper:
                             self.driver = webdriver.Chrome(service=service, options=chrome_options)
                             logger.info(f"Initialized Chrome WebDriver using webdriver_manager with path: {driver_path}")
                         except Exception as e:
-                            logger.error(f"Failed to initialize Chrome WebDriver with webdriver_manager: {e}")
-                            raise
-                    else:
-                        # If webdriver_manager is not available, try the default approach
-                        try:
-                            # Try to use Selenium's built-in manager
-                            self.driver = webdriver.Chrome(options=chrome_options)
-                            logger.info("Initialized Chrome WebDriver using default approach")
-                        except Exception as e:
-                            logger.error(f"Failed to initialize Chrome WebDriver: {e}")
-                            raise
-                except Exception as e:
-                    logger.error(f"All Chrome initialization methods failed: {e}")
-                    raise
+                            logger.warning(f"Failed to initialize Chrome WebDriver using webdriver_manager: {e}")
+                            # Fall through to next approach
 
-                self.driver.implicitly_wait(self.timeout)
+                    # Second try: Use default Chrome driver without webdriver_manager
+                    if not self.driver:
+                        try:
+                            logger.info("Trying to initialize Chrome WebDriver without webdriver_manager")
+                            self.driver = webdriver.Chrome(options=chrome_options)
+                            logger.debug("Initialized Chrome WebDriver using default Chrome driver")
+                        except Exception as e2:
+                            logger.error(f"Failed to initialize Chrome WebDriver using default approach: {e2}")
+
+                            # Third try: If on Render, try with specific binary location
+                            if is_render:
+                                try:
+                                    logger.info("Trying Render-specific Chrome configuration")
+                                    # Try with a different binary location
+                                    chrome_options.binary_location = "/opt/render/chrome/chrome"
+                                    self.driver = webdriver.Chrome(options=chrome_options)
+                                    logger.debug("Initialized Chrome WebDriver using Render-specific configuration")
+                                except Exception as e3:
+                                    logger.error(f"Failed to initialize Chrome WebDriver with Render-specific configuration: {e3}")
+                                    # Don't raise, just set driver to None
+                                    self.driver = None
+                            else:
+                                # Don't raise, just set driver to None
+                                self.driver = None
+
+                    # Only set implicit wait if driver was successfully initialized
+                    if self.driver:
+                        self.driver.implicitly_wait(self.timeout)
+                        logger.info("Chrome WebDriver initialized successfully")
+                    else:
+                        logger.warning("Chrome WebDriver initialization failed, falling back to requests-based scraping")
             except Exception as e:
                 logger.error(f"Error initializing Chrome WebDriver: {e}")
                 self.driver = None

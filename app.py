@@ -151,6 +151,11 @@ def api_restart_worker():
     """API endpoint to restart the worker thread."""
     return jsonify(task_master.restart_worker())
 
+@app.route('/api/restart-monitor', methods=['POST'])
+def api_restart_monitor():
+    """API endpoint to restart the monitor thread."""
+    return jsonify(task_master.restart_monitor())
+
 @app.route('/cancel/<job_id>', methods=['POST'])
 def cancel_job(job_id):
     """Cancel a running job."""

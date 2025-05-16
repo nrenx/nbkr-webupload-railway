@@ -6,6 +6,7 @@ This script logs into the college portal and navigates to the mid marks page.
 It extracts mid-term marks data and stores it in a structured format.
 """
 
+import os
 import sys
 import logging
 import argparse
@@ -166,15 +167,29 @@ class MidMarksScraper:
         if SELENIUM_AVAILABLE:
             try:
                 options = Options()
-                if self.headless:
-                    options.add_argument('--headless')
+
+                # Common options for both headless and non-headless mode
+                options.add_argument('--disable-gpu')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+
+                # Check if running on Render.com (environment detection)
+                is_render = os.environ.get('RENDER') == 'true'
+
+                if is_render:
+                    logger.info("Running on Render.com, using special Chrome configuration")
+                    # On Render, we need to specify the Chrome binary location
+                    options.binary_location = "/usr/bin/google-chrome-stable"
+                    # Always use headless mode on Render
+                    options.add_argument('--headless=new')
+                elif self.headless:
+                    options.add_argument('--headless=new')
                 else:
                     # Make sure the browser window is visible
                     options.add_argument('--start-maximized')
                     options.add_argument('--disable-extensions')
                     options.add_argument('--disable-infobars')
                     options.add_argument('--window-size=1920,1080')
-                    options.add_argument('--disable-gpu')
                     options.add_experimental_option('detach', True)  # Keep browser open
                     options.add_experimental_option('excludeSwitches', ['enable-automation'])
                     options.add_experimental_option('useAutomationExtension', False)
@@ -185,7 +200,7 @@ class MidMarksScraper:
 
                 # Try different approaches to initialize the Chrome driver
                 try:
-                    # Use webdriver_manager to get the correct driver and AVOID system ChromeDriver
+                    # First try: Use webdriver_manager to get the correct driver
                     try:
                         from webdriver_manager.chrome import ChromeDriverManager
                         from selenium.webdriver.chrome.service import Service as ChromeService
@@ -198,15 +213,41 @@ class MidMarksScraper:
                         self.driver = webdriver.Chrome(service=service, options=options)
                         logger.debug(f"Initialized Chrome WebDriver using webdriver_manager with path: {driver_path}")
                     except Exception as e:
-                        logger.error(f"Failed to initialize Chrome WebDriver: {e}")
-                        raise
-                except Exception as e:
-                    logger.error(f"Failed to initialize Chrome WebDriver: {e}")
-                    raise
+                        logger.warning(f"Failed to initialize Chrome WebDriver using webdriver_manager: {e}")
 
-                self.driver.set_window_size(1366, 768)
-                self.driver.implicitly_wait(10)  # Wait up to 10 seconds for elements to appear
-                logger.info("Initialized Chrome WebDriver")
+                        # Second try: Use default Chrome driver without webdriver_manager
+                        try:
+                            logger.info("Trying to initialize Chrome WebDriver without webdriver_manager")
+                            self.driver = webdriver.Chrome(options=options)
+                            logger.debug("Initialized Chrome WebDriver using default Chrome driver")
+                        except Exception as e2:
+                            logger.error(f"Failed to initialize Chrome WebDriver using default approach: {e2}")
+
+                            # Third try: If on Render, try with specific binary location
+                            if is_render:
+                                try:
+                                    logger.info("Trying Render-specific Chrome configuration")
+                                    # Try with a different binary location
+                                    options.binary_location = "/opt/render/chrome/chrome"
+                                    self.driver = webdriver.Chrome(options=options)
+                                    logger.debug("Initialized Chrome WebDriver using Render-specific configuration")
+                                except Exception as e3:
+                                    logger.error(f"Failed to initialize Chrome WebDriver with Render-specific configuration: {e3}")
+                                    raise
+                            else:
+                                raise
+                except Exception as e:
+                    logger.error(f"All attempts to initialize Chrome WebDriver failed: {e}")
+                    # Don't raise here, just set driver to None and continue with requests-based approach
+                    self.driver = None
+
+                # Only set window size and implicit wait if driver was successfully initialized
+                if self.driver:
+                    self.driver.set_window_size(1366, 768)
+                    self.driver.implicitly_wait(10)  # Wait up to 10 seconds for elements to appear
+                    logger.info("Initialized Chrome WebDriver")
+                else:
+                    logger.warning("Chrome WebDriver initialization failed, falling back to requests-based scraping")
             except Exception as e:
                 logger.error(f"Error initializing Chrome WebDriver: {e}")
                 self.driver = None

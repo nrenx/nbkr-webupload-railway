@@ -200,8 +200,20 @@
                                                     <td>${data.monitor_alive ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>'}</td>
                                                 </tr>
                                                 <tr>
-                                                    <th>Last Activity</th>
-                                                    <td>${data.last_activity_seconds_ago} seconds ago</td>
+                                                    <th>Supervisor Thread Alive</th>
+                                                    <td>${data.supervisor_alive ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>'}</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Worker Last Activity</th>
+                                                    <td>${data.last_worker_activity_seconds_ago} seconds ago</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Monitor Last Activity</th>
+                                                    <td>${data.last_monitor_activity_seconds_ago} seconds ago</td>
+                                                </tr>
+                                                <tr>
+                                                    <th>Supervisor Last Activity</th>
+                                                    <td>${data.last_supervisor_activity_seconds_ago} seconds ago</td>
                                                 </tr>
                                                 <tr>
                                                     <th>Active Job</th>
@@ -224,6 +236,7 @@
                                     </div>
                                     <div class="modal-footer">
                                         <button type="button" class="btn btn-danger" id="restartWorkerBtn">Restart Worker Thread</button>
+                                        <button type="button" class="btn btn-warning" id="restartMonitorBtn">Restart Monitor Thread</button>
                                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                                     </div>
                                 </div>
@@ -245,7 +258,7 @@
                         document.body.removeChild(modalContainer);
                     });
 
-                    // Add event listener for the restart button
+                    // Add event listener for the restart worker button
                     document.getElementById('restartWorkerBtn').addEventListener('click', function() {
                         if (confirm('Are you sure you want to restart the worker thread? Any running job will be marked as failed.')) {
                             fetch('/api/restart-worker', {
@@ -271,6 +284,36 @@
                             .catch(error => {
                                 console.error('Error restarting worker thread:', error);
                                 alert('Error restarting worker thread. See console for details.');
+                            });
+                        }
+                    });
+
+                    // Add event listener for the restart monitor button
+                    document.getElementById('restartMonitorBtn').addEventListener('click', function() {
+                        if (confirm('Are you sure you want to restart the monitor thread?')) {
+                            fetch('/api/restart-monitor', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                }
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    alert('Monitor thread restarted successfully!');
+                                    // Close the current modal
+                                    bootstrap.Modal.getInstance(document.getElementById('workerStatusModal')).hide();
+                                    // Refresh the page to reflect the changes
+                                    setTimeout(() => {
+                                        window.location.reload();
+                                    }, 1000);
+                                } else {
+                                    alert('Failed to restart monitor thread: ' + data.error);
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Error restarting monitor thread:', error);
+                                alert('Error restarting monitor thread. See console for details.');
                             });
                         }
                     });
