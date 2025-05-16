@@ -1,9 +1,9 @@
 {
   "build": {
-    "command": "pip install -r requirements.txt && python -m playwright install chromium"
+    "command": "pip install -r requirements.txt && python -m playwright install chromium && python -m playwright install-deps"
   },
   "start": {
-    "command": "python -m playwright install chromium && gunicorn app:app --bind 0.0.0.0:10000"
+    "command": "gunicorn app:app --bind 0.0.0.0:10000"
   },
   "envs": {
     "PYTHON_VERSION": "3.9.0"
