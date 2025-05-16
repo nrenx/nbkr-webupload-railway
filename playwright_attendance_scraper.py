@@ -18,6 +18,7 @@ import threading
 import multiprocessing
 import asyncio
 import concurrent.futures
+import requests
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple, Union
@@ -58,6 +59,43 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("attendance_scraper")
+
+
+def login(session, username, password):
+    """
+    Log in to the attendance portal using requests.
+
+    Args:
+        session: Requests session
+        username: Login username
+        password: Login password
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    try:
+        # First, get the login page to get any cookies or tokens
+        response = session.get(ATTENDANCE_PORTAL_URL, timeout=30)
+        response.raise_for_status()
+
+        # Prepare login data
+        login_data = {
+            'username': username,
+            'password': password,
+            'submit': 'Login'
+        }
+
+        # Submit the login form
+        response = session.post(ATTENDANCE_PORTAL_URL, data=login_data, timeout=30)
+        response.raise_for_status()
+
+        # Check if login was successful
+        if "login" not in response.url.lower():
+            return True, ""
+        else:
+            return False, "Login failed. Check your credentials."
+    except Exception as e:
+        return False, str(e)
 
 
 def retry_on_network_error(max_retries=3, initial_backoff=1):
@@ -141,6 +179,16 @@ class AttendanceScraper:
             'save_debug': save_debug
         }
 
+        # Create a requests session for fallback
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        })
+
         # Check if Playwright is available
         if not PLAYWRIGHT_AVAILABLE:
             logger.error("Playwright is not available. Please install it with: pip install playwright")
@@ -149,8 +197,14 @@ class AttendanceScraper:
 
         logger.info(f"Initialized attendance scraper (headless: {headless})")
 
-        # Initialize the browser
-        self.initialize()
+        # Initialize the browser (but don't fail if it doesn't work)
+        try:
+            browser_initialized = self.initialize()
+            if not browser_initialized:
+                logger.warning("Browser initialization failed, will use requests-based scraping only")
+        except Exception as e:
+            logger.error(f"Error during browser initialization: {e}")
+            logger.warning("Browser initialization failed, will use requests-based scraping only")
 
     def __enter__(self):
         """Context manager entry."""
@@ -198,8 +252,15 @@ class AttendanceScraper:
                         chrome_paths = [
                             "/usr/bin/google-chrome-stable",
                             "/usr/bin/google-chrome",
+                            "/usr/local/bin/chrome",
+                            "/usr/local/bin/google-chrome",
                             "/opt/google/chrome/chrome"
                         ]
+
+                        # Log all paths for debugging
+                        for path in chrome_paths:
+                            exists = os.path.exists(path)
+                            logger.info(f"Chrome path check: {path}: {'EXISTS' if exists else 'NOT FOUND'}")
 
                         executable_path = None
                         for path in chrome_paths:
@@ -216,10 +277,16 @@ class AttendanceScraper:
                             )
                             logger.info(f"Successfully launched browser with system Chrome at {executable_path}")
                         else:
-                            raise Exception("Could not find Chrome executable")
+                            logger.error("Could not find Chrome executable in any standard location")
+                            # Instead of raising an exception, we'll fall back to requests-based scraping
+                            logger.warning("Falling back to requests-based scraping")
+                            p.stop()
+                            return False
                     except Exception as e2:
                         logger.error(f"Failed to launch browser with system Chrome: {e2}")
-                        raise Exception(f"All browser launch attempts failed: {e1}, then {e2}")
+                        logger.warning("Falling back to requests-based scraping")
+                        p.stop()
+                        return False
                 else:
                     # Not on Render, just raise the original exception
                     raise e1
@@ -248,7 +315,10 @@ class AttendanceScraper:
             logger.error(f"Error initializing browser: {e}")
             # Clean up any resources that might have been created
             self.close()
-            raise
+
+            # Instead of raising an exception, we'll fall back to requests-based scraping
+            logger.warning("Falling back to requests-based scraping")
+            return False
 
     @retry_on_network_error()
     def authenticate(self) -> bool:
@@ -261,43 +331,73 @@ class AttendanceScraper:
         if self.logged_in:
             return True
 
-        if not self.page:
-            self.initialize()
+        # Try to authenticate using Playwright if available
+        if hasattr(self, 'page') and self.page:
+            try:
+                # Take screenshots if debug is enabled
+                if self.settings.get('save_debug', False):
+                    debug_dir = Path("debug_screenshots")
+                    debug_dir.mkdir(exist_ok=True)
+                    self.page.screenshot(path=str(debug_dir / "before_login.png"))
 
-        try:
-            logger.info("Authenticating using Playwright...")
-            # Go directly to the attendance portal URL which will redirect to login page
-            self.page.goto(ATTENDANCE_PORTAL_URL)
+                logger.info("Authenticating using Playwright...")
+                # Go directly to the attendance portal URL which will redirect to login page
+                self.page.goto(ATTENDANCE_PORTAL_URL)
 
-            # Wait for the login form to load
-            self.page.wait_for_selector('input[name="username"]', state='visible')
+                # Wait for the login form to load
+                self.page.wait_for_selector('input[name="username"]', state='visible')
 
-            # Log the current URL to verify we're on the login page
-            current_url = self.page.url
-            logger.debug(f"Current URL after navigation: {current_url}")
+                # Log the current URL to verify we're on the login page
+                current_url = self.page.url
+                logger.debug(f"Current URL after navigation: {current_url}")
 
-            # Fill in the login form
-            self.page.fill('input[name="username"]', self.username)
-            self.page.fill('input[name="password"]', self.password)
+                # Fill in the login form
+                self.page.fill('input[name="username"]', self.username)
+                self.page.fill('input[name="password"]', self.password)
 
-            # Submit the form
-            self.page.click('input[type="submit"]')
+                # Take screenshots if debug is enabled
+                if self.settings.get('save_debug', False):
+                    self.page.screenshot(path=str(debug_dir / "login_form_filled.png"))
 
-            # Wait for navigation to complete
-            self.page.wait_for_load_state('networkidle')
+                # Submit the form
+                self.page.click('input[type="submit"]')
 
-            # Check if login was successful
-            current_url = self.page.url
-            if "login" not in current_url.lower():
-                self.logged_in = True
-                logger.info("Login successful using Playwright")
-                return True
-            else:
-                logger.error("Login failed using Playwright")
-                return False
+                # Wait for navigation to complete
+                self.page.wait_for_load_state('networkidle')
 
-        except Exception as e:
-            logger.error(f"Error authenticating using Playwright: {e}")
+                # Take screenshots if debug is enabled
+                if self.settings.get('save_debug', False):
+                    self.page.screenshot(path=str(debug_dir / "after_login.png"))
+
+                # Check if login was successful
+                current_url = self.page.url
+                if "login" not in current_url.lower():
+                    self.logged_in = True
+                    logger.info("Login successful using Playwright")
+                    return True
+                else:
+                    logger.error("Login failed using Playwright")
+
+                    # Save page content for debugging
+                    if self.settings.get('save_debug', False):
+                        content = self.page.content()
+                        with open(debug_dir / "login_failed.html", "w") as f:
+                            f.write(content)
+
+                    return False
+
+            except Exception as e:
+                logger.error(f"Error authenticating using Playwright: {e}")
+                # Fall back to requests-based authentication
+
+        # Use requests-based authentication as fallback
+        logger.info("Authenticating using requests...")
+        success, error_msg = login(self.session, self.username, self.password)
+        if success:
+            self.logged_in = True
+            return True
+        else:
+            logger.error(f"Authentication failed: {error_msg}")
             return False
 
     @retry_on_network_error()
@@ -311,30 +411,51 @@ class AttendanceScraper:
         if not self.logged_in and not self.authenticate():
             return None
 
-        try:
-            # We should already be on the attendance page after authentication
-            # But let's navigate there explicitly to be sure
-            logger.info(f"Navigating to attendance page: {ATTENDANCE_PORTAL_URL}")
-            self.page.goto(ATTENDANCE_PORTAL_URL)
+        # Try to navigate using Playwright if available
+        if hasattr(self, 'page') and self.page:
+            try:
+                # We should already be on the attendance page after authentication
+                # But let's navigate there explicitly to be sure
+                logger.info(f"Navigating to attendance page using Playwright: {ATTENDANCE_PORTAL_URL}")
+                self.page.goto(ATTENDANCE_PORTAL_URL)
 
-            # Wait for the page to load
-            self.page.wait_for_load_state('networkidle')
+                # Wait for the page to load
+                self.page.wait_for_load_state('networkidle')
+
+                # Log the current URL for debugging
+                current_url = self.page.url
+                logger.debug(f"Current URL after navigation: {current_url}")
+
+                # Check if we're on the correct page
+                content = self.page.content()
+                if "attendance" in content.lower():
+                    logger.info("Successfully navigated to attendance page using Playwright")
+                    return content
+                else:
+                    logger.warning("Navigation to attendance page failed using Playwright - redirected to another page")
+                    # Fall back to requests-based navigation
+            except Exception as e:
+                logger.error(f"Error navigating to attendance page using Playwright: {e}")
+                # Fall back to requests-based navigation
+
+        # Use requests-based navigation as fallback
+        try:
+            logger.info(f"Navigating to attendance page using requests: {ATTENDANCE_PORTAL_URL}")
+            response = self.session.get(ATTENDANCE_PORTAL_URL, timeout=self.timeout)
+            response.raise_for_status()
 
             # Log the current URL for debugging
-            current_url = self.page.url
-            logger.debug(f"Current URL after navigation: {current_url}")
+            logger.debug(f"Current URL after navigation: {response.url}")
 
             # Check if we're on the correct page
-            content = self.page.content()
-            if "attendance" in content.lower():
-                logger.info("Successfully navigated to attendance page")
-                return content
+            if "attendance" in response.text.lower():
+                logger.info("Successfully navigated to attendance page using requests")
+                return response.text
             else:
-                logger.warning("Navigation to attendance page failed - redirected to another page")
+                logger.warning("Navigation to attendance page failed using requests - redirected to another page")
                 return None
-
         except Exception as e:
-            logger.error(f"Error navigating to attendance page: {e}")
+            logger.error(f"Error navigating to attendance page using requests: {e}")
             return None
 
     @retry_on_network_error()
@@ -353,6 +474,11 @@ class AttendanceScraper:
         """
         content = self.navigate_to_attendance_page()
         if not content:
+            return None
+
+        # Only proceed with Playwright if the page is available
+        if not hasattr(self, 'page') or not self.page:
+            logger.warning("Playwright page not available, cannot select form filters")
             return None
 
         try:
@@ -1185,8 +1311,9 @@ def worker_function(worker_id: int, combinations: List[Tuple], args: argparse.Na
     # Navigate to attendance page
     content = scraper.navigate_to_attendance_page()
     if not content:
-        worker_logger.error(f"Worker {worker_id}: Failed to navigate to attendance page. Exiting.")
-        return [(worker_id, "nav_failed", None)]
+        worker_logger.warning(f"Worker {worker_id}: Failed to navigate to attendance page using Playwright.")
+        worker_logger.info(f"Worker {worker_id}: Will try to continue with requests-based scraping.")
+        # We'll continue and let the individual methods handle the fallback to requests
 
     worker_logger.info(f"Worker {worker_id}: Ready to process combinations")
 

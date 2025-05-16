@@ -17,12 +17,12 @@ import queue
 import threading
 import multiprocessing
 import concurrent.futures
+import requests
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple, Union
 from functools import wraps
 
-import requests
 from bs4 import BeautifulSoup
 
 # Import Playwright for browser automation
@@ -61,6 +61,9 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("mid_marks_scraper")
+
+
+# We already have a login function imported from login_utils
 
 
 def retry_on_network_error(max_retries=3, initial_backoff=1):
@@ -198,8 +201,15 @@ class MidMarksScraper:
                             chrome_paths = [
                                 "/usr/bin/google-chrome-stable",
                                 "/usr/bin/google-chrome",
+                                "/usr/local/bin/chrome",
+                                "/usr/local/bin/google-chrome",
                                 "/opt/google/chrome/chrome"
                             ]
+
+                            # Log all paths for debugging
+                            for path in chrome_paths:
+                                exists = os.path.exists(path)
+                                logger.info(f"Chrome path check: {path}: {'EXISTS' if exists else 'NOT FOUND'}")
 
                             executable_path = None
                             for path in chrome_paths:
@@ -216,10 +226,16 @@ class MidMarksScraper:
                                 )
                                 logger.info(f"Successfully launched browser with system Chrome at {executable_path}")
                             else:
-                                raise Exception("Could not find Chrome executable")
+                                logger.error("Could not find Chrome executable in any standard location")
+                                # Instead of raising an exception, we'll fall back to requests-based scraping
+                                logger.warning("Playwright initialization failed, falling back to requests-based scraping")
+                                p.stop()
+                                return
                         except Exception as e2:
                             logger.error(f"Failed to launch browser with system Chrome: {e2}")
-                            raise Exception(f"All browser launch attempts failed: {e1}, then {e2}")
+                            logger.warning("Playwright initialization failed, falling back to requests-based scraping")
+                            p.stop()
+                            return
                     else:
                         # Not on Render, just raise the original exception
                         raise e1

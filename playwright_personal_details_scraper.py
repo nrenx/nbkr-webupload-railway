@@ -225,8 +225,15 @@ class PersonalDetailsScraper:
                         chrome_paths = [
                             "/usr/bin/google-chrome-stable",
                             "/usr/bin/google-chrome",
+                            "/usr/local/bin/chrome",
+                            "/usr/local/bin/google-chrome",
                             "/opt/google/chrome/chrome"
                         ]
+
+                        # Log all paths for debugging
+                        for path in chrome_paths:
+                            exists = os.path.exists(path)
+                            logger.info(f"Chrome path check: {path}: {'EXISTS' if exists else 'NOT FOUND'}")
 
                         executable_path = None
                         for path in chrome_paths:
@@ -243,10 +250,16 @@ class PersonalDetailsScraper:
                             )
                             logger.info(f"Successfully launched browser with system Chrome at {executable_path}")
                         else:
-                            raise Exception("Could not find Chrome executable")
+                            logger.error("Could not find Chrome executable in any standard location")
+                            # Instead of raising an exception, we'll fall back to requests-based scraping
+                            logger.warning("Playwright initialization failed, falling back to requests-based scraping")
+                            p.stop()
+                            return
                     except Exception as e2:
                         logger.error(f"Failed to launch browser with system Chrome: {e2}")
-                        raise Exception(f"All browser launch attempts failed: {e1}, then {e2}")
+                        logger.warning("Playwright initialization failed, falling back to requests-based scraping")
+                        p.stop()
+                        return
                 else:
                     # Not on Render, just raise the original exception
                     raise e1

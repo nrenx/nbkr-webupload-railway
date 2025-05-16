@@ -11,13 +11,47 @@ services:
       echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
       apt-get update
       apt-get install -y google-chrome-stable
+      # Verify Chrome installation
+      google-chrome-stable --version
+      # Create symlinks to ensure Chrome is found in standard locations
+      ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chrome
+      ln -sf /usr/bin/google-chrome-stable /usr/local/bin/google-chrome
+      # Make sure Chrome is executable
+      chmod +x /usr/bin/google-chrome-stable
+      chmod +x /usr/local/bin/chrome
+      chmod +x /usr/local/bin/google-chrome
+      # Install Chrome dependencies
+      apt-get install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
       # Install Python dependencies
       pip install -r requirements.txt
       # Install Playwright with all dependencies
       pip install playwright
       python -m playwright install --with-deps chromium
-      # Verify installation
+      # Verify Playwright installation
       python -c "from playwright.sync_api import sync_playwright; print('Playwright installation verified')"
+      # Install Playwright browsers explicitly
+      PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright python -m playwright install chromium
+      # Make sure Playwright browsers are executable
+      find /opt/render/.cache/ms-playwright -type f -name "chrome*" -exec chmod +x {} \;
+      # Create a simple script to check Chrome paths
+      echo '#!/usr/bin/env python3
+import os
+import sys
+chrome_paths = [
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/local/bin/chrome",
+    "/usr/local/bin/google-chrome",
+    "/opt/google/chrome/chrome"
+]
+print("Checking Chrome paths:")
+for path in chrome_paths:
+    exists = os.path.exists(path)
+    print(f"{path}: {'EXISTS' if exists else 'NOT FOUND'}")
+sys.exit(0)
+' > /tmp/check_chrome.py
+      # Run the script to check Chrome paths
+      python /tmp/check_chrome.py
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
