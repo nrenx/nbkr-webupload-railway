@@ -484,6 +484,31 @@ class TaskMaster:
             True if the script ran successfully, False otherwise
         """
         try:
+            # Check if we should use Playwright version of the script
+            use_playwright = True
+            playwright_script = None
+
+            # Map traditional scripts to Playwright versions
+            script_mapping = {
+                "attendance_scraper.py": "playwright_attendance_scraper.py",
+                # Add more mappings as they become available
+                # "mid_marks_scraper.py": "playwright_mid_marks_scraper.py",
+                # "personal_details_scraper.py": "playwright_personal_details_scraper.py",
+            }
+
+            # Check if a Playwright version exists for this script
+            if script_name in script_mapping:
+                playwright_script = script_mapping[script_name]
+                # Check if the Playwright script file exists
+                if os.path.exists(playwright_script):
+                    script_name = playwright_script
+                    job.add_log(f"Using Playwright version: {playwright_script}")
+                else:
+                    job.add_log(f"Playwright script {playwright_script} not found, using traditional script")
+                    use_playwright = False
+            else:
+                use_playwright = False
+
             # Build the command
             cmd = [sys.executable, script_name]
 
@@ -536,7 +561,7 @@ class TaskMaster:
                             progress_str = line.split("%")[0].strip().split()[-1]
                             script_progress = int(progress_str)
                             # Calculate overall progress
-                            script_index = job.scripts.index(script_name)
+                            script_index = job.scripts.index(script_name.replace("playwright_", ""))
                             overall_progress = int(((script_index + script_progress / 100) / len(job.scripts)) * 100)
                             job.update_progress(overall_progress)
                         except (ValueError, IndexError):
@@ -544,7 +569,7 @@ class TaskMaster:
                     # Also check for completion messages
                     elif any(x in line.lower() for x in ["completed successfully", "finished", "done", "complete", "uploaded"]):
                         # If we see a completion message, set progress to 100% for this script
-                        script_index = job.scripts.index(script_name)
+                        script_index = job.scripts.index(script_name.replace("playwright_", ""))
                         # Calculate overall progress (this script is 100% done)
                         overall_progress = int(((script_index + 1) / len(job.scripts)) * 100)
                         job.update_progress(overall_progress)

@@ -2,6 +2,9 @@
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
+# Playwright for modern web scraping (replacing Selenium)
+playwright>=1.40.0
+# Keep Selenium as fallback
 selenium>=4.10.0
 webdriver-manager>=4.0.0
 # pandas is optional for data export functionality
