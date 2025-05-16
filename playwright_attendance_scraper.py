@@ -162,7 +162,7 @@ class AttendanceScraper:
 
     def initialize(self):
         """Initialize the browser and context."""
-        # Simple initialization with minimal error handling
+        # Try multiple approaches to initialize the browser
         try:
             # Start playwright
             p = sync_playwright().start()
@@ -179,11 +179,50 @@ class AttendanceScraper:
                     '--disable-dev-shm-usage',
                 ]
 
-            # Launch browser
-            browser = p.chromium.launch(
-                headless=self.headless,
-                args=browser_args
-            )
+            # First try: Launch using default Playwright browser
+            try:
+                logger.info("Attempting to launch browser with default Playwright installation")
+                browser = p.chromium.launch(
+                    headless=self.headless,
+                    args=browser_args
+                )
+                logger.info("Successfully launched browser with default Playwright installation")
+            except Exception as e1:
+                logger.warning(f"Failed to launch browser with default Playwright installation: {e1}")
+
+                # Second try: Try with system Chrome if on Render
+                if is_render:
+                    try:
+                        logger.info("Attempting to launch browser with system Chrome")
+                        # Try with the Chrome binary installed by Render
+                        chrome_paths = [
+                            "/usr/bin/google-chrome-stable",
+                            "/usr/bin/google-chrome",
+                            "/opt/google/chrome/chrome"
+                        ]
+
+                        executable_path = None
+                        for path in chrome_paths:
+                            if os.path.exists(path):
+                                executable_path = path
+                                logger.info(f"Found Chrome at {path}")
+                                break
+
+                        if executable_path:
+                            browser = p.chromium.launch(
+                                headless=self.headless,
+                                executable_path=executable_path,
+                                args=browser_args
+                            )
+                            logger.info(f"Successfully launched browser with system Chrome at {executable_path}")
+                        else:
+                            raise Exception("Could not find Chrome executable")
+                    except Exception as e2:
+                        logger.error(f"Failed to launch browser with system Chrome: {e2}")
+                        raise Exception(f"All browser launch attempts failed: {e1}, then {e2}")
+                else:
+                    # Not on Render, just raise the original exception
+                    raise e1
 
             # Create context
             context = browser.new_context(

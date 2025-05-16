@@ -13,8 +13,11 @@ services:
       apt-get install -y google-chrome-stable
       # Install Python dependencies
       pip install -r requirements.txt
-      # Install Playwright browsers
-      playwright install chromium
+      # Install Playwright with all dependencies
+      pip install playwright
+      python -m playwright install --with-deps chromium
+      # Verify installation
+      python -c "from playwright.sync_api import sync_playwright; print('Playwright installation verified')"
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
