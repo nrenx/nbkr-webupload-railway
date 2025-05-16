@@ -491,9 +491,8 @@ class TaskMaster:
             # Map traditional scripts to Playwright versions
             script_mapping = {
                 "attendance_scraper.py": "playwright_attendance_scraper.py",
-                # Add more mappings as they become available
-                # "mid_marks_scraper.py": "playwright_mid_marks_scraper.py",
-                # "personal_details_scraper.py": "playwright_personal_details_scraper.py",
+                "mid_marks_scraper.py": "playwright_mid_marks_scraper.py",
+                "personal_details_scraper.py": "playwright_personal_details_scraper.py",
             }
 
             # Check if a Playwright version exists for this script
