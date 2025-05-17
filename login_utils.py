@@ -9,18 +9,8 @@ import sys
 import time
 import logging
 import requests
-import re
-import base64
-import io
 from bs4 import BeautifulSoup
-from typing import Dict, Optional, Tuple, List
-
-# Try to import PIL for CAPTCHA handling
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
+from typing import Dict, Optional, Tuple
 
 # Import configuration
 from config import USERNAME, PASSWORD, ATTENDANCE_PORTAL_URL, MID_MARKS_PORTAL_URL, DEFAULT_SETTINGS
@@ -111,38 +101,6 @@ def login(session: requests.Session, username: str = USERNAME, password: str = P
             'username': username,  # Field name confirmed from the login process
             'password': password,  # Field name confirmed from the login process
         }
-
-        # Check if there's a CAPTCHA field and handle it
-        captcha_field = soup.select_one('input[name="captcha"]')
-        if captcha_field:
-            logger.info("CAPTCHA field detected in the login form")
-
-            # Look for CAPTCHA image
-            captcha_img = soup.select_one('img[src*="captcha"]')
-            if captcha_img:
-                captcha_src = captcha_img.get('src', '')
-                logger.info(f"CAPTCHA image found: {captcha_src}")
-
-                # If it's a relative URL, make it absolute
-                if captcha_src and not captcha_src.startswith('http'):
-                    if captcha_src.startswith('/'):
-                        captcha_src = f"{BASE_URL}{captcha_src}"
-                    else:
-                        captcha_src = f"{BASE_URL}/{captcha_src}"
-
-                # Try to solve the CAPTCHA
-                captcha_solution = try_solve_captcha(captcha_src, session)
-                if captcha_solution:
-                    login_data['captcha'] = captcha_solution
-                    logger.info(f"Using solved CAPTCHA value: {captcha_solution}")
-                else:
-                    # If we couldn't solve it, try some common values
-                    common_captchas = ["12345", "54321", "abcde", "admin", "test", "captcha"]
-                    # Use the first one for now, in production you'd try them all
-                    login_data['captcha'] = common_captchas[0]
-                    logger.warning(f"Using default CAPTCHA value: {common_captchas[0]} - this may not work")
-            else:
-                logger.warning("CAPTCHA field found but no CAPTCHA image detected")
 
         # Look for the submit button to get its name and value
         submit_button = soup.select_one('input[type="submit"]')
@@ -241,38 +199,6 @@ def login_to_attendance(session: requests.Session, username: str = USERNAME, pas
             'password': password,
         }
 
-        # Check if there's a CAPTCHA field and handle it
-        captcha_field = soup.select_one('input[name="captcha"]')
-        if captcha_field:
-            logger.info("CAPTCHA field detected in the attendance login form")
-
-            # Look for CAPTCHA image
-            captcha_img = soup.select_one('img[src*="captcha"]')
-            if captcha_img:
-                captcha_src = captcha_img.get('src', '')
-                logger.info(f"CAPTCHA image found: {captcha_src}")
-
-                # If it's a relative URL, make it absolute
-                if captcha_src and not captcha_src.startswith('http'):
-                    if captcha_src.startswith('/'):
-                        captcha_src = f"{BASE_URL}{captcha_src}"
-                    else:
-                        captcha_src = f"{BASE_URL}/{captcha_src}"
-
-                # Try to solve the CAPTCHA
-                captcha_solution = try_solve_captcha(captcha_src, session)
-                if captcha_solution:
-                    login_data['captcha'] = captcha_solution
-                    logger.info(f"Using solved CAPTCHA value: {captcha_solution}")
-                else:
-                    # If we couldn't solve it, try some common values
-                    common_captchas = ["12345", "54321", "abcde", "admin", "test", "captcha"]
-                    # Use the first one for now, in production you'd try them all
-                    login_data['captcha'] = common_captchas[0]
-                    logger.warning(f"Using default CAPTCHA value: {common_captchas[0]} - this may not work")
-            else:
-                logger.warning("CAPTCHA field found but no CAPTCHA image detected")
-
         # Look for the submit button to get its name and value
         submit_button = soup.select_one('input[type="submit"]')
         if submit_button:
@@ -329,44 +255,7 @@ def login_to_attendance(session: requests.Session, username: str = USERNAME, pas
         logger.error(error_msg)
         return False, error_msg
 
-def try_solve_captcha(captcha_url: str, session: requests.Session) -> Optional[str]:
-    """
-    Try to solve a simple CAPTCHA.
 
-    This is a basic implementation that tries to handle simple text-based CAPTCHAs.
-    For production use, you would need a more robust CAPTCHA solving service.
-
-    Args:
-        captcha_url: URL of the CAPTCHA image
-        session: requests.Session object to use for fetching the image
-
-    Returns:
-        String with the solved CAPTCHA or None if unable to solve
-    """
-    if not PIL_AVAILABLE:
-        logger.warning("PIL not available, cannot attempt to solve CAPTCHA")
-        return None
-
-    try:
-        # Fetch the CAPTCHA image
-        logger.info(f"Fetching CAPTCHA image from {captcha_url}")
-        response = session.get(captcha_url, stream=True)
-        response.raise_for_status()
-
-        # Open the image
-        img = Image.open(io.BytesIO(response.content))
-
-        # Try different approaches to extract text
-        # 1. If it's a very simple CAPTCHA, try to extract digits directly
-        # This is just a placeholder - real CAPTCHA solving would be more complex
-        captcha_text = "12345"  # Default fallback
-
-        logger.info(f"Attempted to solve CAPTCHA, result: {captcha_text}")
-        return captcha_text
-
-    except Exception as e:
-        logger.error(f"Error trying to solve CAPTCHA: {e}")
-        return None
 
 def is_logged_in(session: requests.Session) -> bool:
     """

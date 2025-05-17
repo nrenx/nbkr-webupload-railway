@@ -5,8 +5,6 @@ lxml==4.9.3
 # Selenium for web scraping
 selenium>=4.10.0
 webdriver-manager>=4.0.0
-# Pillow for CAPTCHA handling
-Pillow>=9.0.0
 # Playwright is optional and not used in this deployment
 # playwright>=1.40.0
 # pandas is optional for data export functionality
