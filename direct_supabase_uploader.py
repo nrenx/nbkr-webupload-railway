@@ -223,6 +223,7 @@ def main():
     parser.add_argument('--headless', action='store_true', help='Ignored - for compatibility with scraper scripts')
     parser.add_argument('--max-retries', type=int, help='Ignored - for compatibility with scraper scripts')
     parser.add_argument('--timeout', type=int, help='Ignored - for compatibility with scraper scripts')
+    parser.add_argument('--force-requests', action='store_true', help='Ignored - for compatibility with scraper scripts')
 
     args = parser.parse_args()
 

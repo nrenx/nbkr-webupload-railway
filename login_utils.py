@@ -13,7 +13,10 @@ from bs4 import BeautifulSoup
 from typing import Dict, Optional, Tuple
 
 # Import configuration
-from config import USERNAME, PASSWORD, ATTENDANCE_PORTAL_URL, MID_MARKS_PORTAL_URL, DEFAULT_SETTINGS
+from config import (
+    USERNAME, PASSWORD, ATTENDANCE_PORTAL_URL, MID_MARKS_PORTAL_URL, DEFAULT_SETTINGS,
+    BASE_URL, LOGIN_URL, ATTENDANCE_LOGIN_URL, MID_MARKS_LOGIN_URL
+)
 
 # Configure logging
 logging.basicConfig(
@@ -26,12 +29,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("login_utils")
 
-# Portal URLs
-BASE_URL = "http://103.203.175.90:94"
-# Use the attendance portal URL directly for login
-LOGIN_URL = ATTENDANCE_PORTAL_URL  # This will redirect to login page if not authenticated
-ATTENDANCE_LOGIN_URL = f"{BASE_URL}/attendance/attendanceLogin.php"  # Additional login page for attendance and other sections
-MID_MARKS_URL = MID_MARKS_PORTAL_URL  # URL for mid marks page
+# Use the imported URLs from config.py
+# These are already defined in config.py
 
 def create_session(headers: Optional[Dict[str, str]] = None) -> requests.Session:
     """
@@ -105,9 +104,9 @@ def login(session: requests.Session, username: str = USERNAME, password: str = P
         # Check for CAPTCHA field
         captcha_field = soup.select_one('input[name="captcha"]')
         if captcha_field:
-            # Add an empty value for CAPTCHA field
-            login_data['captcha'] = ''
-            logger.info("Added empty value for captcha field")
+            # Add a dummy value for CAPTCHA field - this seems to be required
+            login_data['captcha'] = '123456'
+            logger.info("Added dummy value for captcha field")
 
         # Look for the submit button to get its name and value
         submit_button = soup.select_one('input[type="submit"]')
@@ -214,11 +213,11 @@ def login_to_attendance(session: requests.Session, username: str = USERNAME, pas
             for input_field in form.find_all('input'):
                 logger.info(f"Input field: name={input_field.get('name', 'No name')}, type={input_field.get('type', 'No type')}")
 
-            # Check for CAPTCHA field and add it to login_data with an empty value
+            # Check for CAPTCHA field and add it to login_data with a dummy value
             captcha_field = form.select_one('input[name="captcha"]')
             if captcha_field:
-                login_data['captcha'] = ''  # Add empty value for captcha field
-                logger.info("Added empty value for captcha field")
+                login_data['captcha'] = '123456'  # Add dummy value for captcha field
+                logger.info("Added dummy value for captcha field")
         else:
             logger.warning("No form found on the attendance login page")
 

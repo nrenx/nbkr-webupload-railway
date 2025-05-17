@@ -6,9 +6,15 @@ It includes portal URLs, credentials, and default settings for the scrapers.
 """
 
 # Portal URLs
+BASE_URL = "http://103.203.175.90:94"
 ATTENDANCE_PORTAL_URL = "http://103.203.175.90:94/attendance/attendanceTillADate.php"
 MID_MARKS_PORTAL_URL = "http://103.203.175.90:94/mid_marks/classSelectionForMarksDisplay.php"
 PERSONAL_DETAILS_URL = "http://103.203.175.90:94/attendance/selectionForRollNos.php"
+
+# Login URLs
+LOGIN_URL = "http://103.203.175.90:94/attendance/attendanceLogin.php"
+ATTENDANCE_LOGIN_URL = "http://103.203.175.90:94/attendance/attendanceLogin.php"
+MID_MARKS_LOGIN_URL = "http://103.203.175.90:94/mid_marks/midMarksLogin.php"
 
 # Authentication credentials
 # NOTE: These credentials change frequently. Update them as needed.

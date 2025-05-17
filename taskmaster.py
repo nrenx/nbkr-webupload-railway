@@ -511,8 +511,10 @@ class TaskMaster:
             cmd.append("--timeout")
             cmd.append("60")
 
-            # Add force_requests parameter if specified
-            if job.params.get("force_requests", False):
+            # Add force_requests parameter if specified and the script supports it
+            # Only personal_details_scraper.py supports this parameter
+            # Other scripts like attendance_scraper.py, mid_marks_scraper.py, and direct_supabase_uploader.py don't support it
+            if job.params.get("force_requests", False) and script_name == "personal_details_scraper.py":
                 cmd.append("--force-requests")
                 job.add_log("Using force-requests mode to reduce memory usage")
 

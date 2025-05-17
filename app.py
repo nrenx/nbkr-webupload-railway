@@ -47,6 +47,10 @@ app.secret_key = os.environ.get("SECRET_KEY", "nbkrist_student_portal_secret_key
 if 'RAILWAY_ENVIRONMENT' in os.environ:
     # Force requests-based scraping on Railway to reduce memory usage
     os.environ['FORCE_REQUESTS_SCRAPING'] = 'true'
+
+    # Add the --force-requests parameter to personal_details_scraper.py
+    # This is needed because personal_details_scraper.py has a specific parameter for this
+    # The other scripts will use the environment variable approach
     logger.info("Running on Railway, forcing requests-based scraping to reduce memory usage")
 
 # Initialize the TaskMaster
@@ -103,8 +107,13 @@ def submit_job():
     # Add Railway-specific parameters
     if 'RAILWAY_ENVIRONMENT' in os.environ:
         # Use lower memory settings on Railway
-        params["force_requests"] = True
-        logger.info("Adding force_requests=True parameter for Railway environment")
+        # Only add force-requests parameter for personal_details_scraper.py
+        if 'personal_details_scraper.py' in selected_scripts:
+            params["force_requests"] = True
+            logger.info("Adding force_requests=True parameter for personal_details_scraper.py on Railway")
+        # For other scripts, we'll use the environment variable approach without adding the parameter
+        # This is because attendance_scraper.py and mid_marks_scraper.py don't have a --force-requests parameter
+        logger.info(f"Using FORCE_REQUESTS_SCRAPING=true environment variable for scripts on Railway")
 
     job = task_master.create_job(
         scripts=selected_scripts,
