@@ -1,5 +1,5 @@
-# Use the official Playwright Python image (includes all browser dependencies)
-FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+# Use the official Python image as a base
+FROM python:3.9-slim
 
 WORKDIR /app
 
