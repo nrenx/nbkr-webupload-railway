@@ -178,10 +178,11 @@ class PersonalDetailsScraper:
                 if is_render:
                     logger.info("Running on Render.com, using special Chrome configuration")
                 elif is_railway:
+                    # Use the same approach as attendance_scraper.py on Railway
                     logger.info("Running on Railway.app, using special Chrome configuration")
 
                     # Check if we should force requests-based scraping on Railway
-                    force_requests = os.environ.get('FORCE_REQUESTS_SCRAPING', 'true').lower() == 'true'
+                    force_requests = os.environ.get('FORCE_REQUESTS_SCRAPING') == 'true'
                     if force_requests:
                         logger.info("Forcing requests-based scraping on Railway to reduce memory usage")
                         self.driver = None
@@ -1773,7 +1774,7 @@ def main():
 
     # If force_requests is specified, set the environment variable
     if args.force_requests:
-        logger.info("Forcing requests-based scraping (no Selenium)")
+        logger.info("Using force-requests mode to reduce memory usage")
         os.environ['FORCE_REQUESTS_SCRAPING'] = 'true'
 
     scraper = PersonalDetailsScraper(

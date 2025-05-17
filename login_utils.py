@@ -102,6 +102,14 @@ def login(session: requests.Session, username: str = USERNAME, password: str = P
             'password': password,  # Field name confirmed from the login process
         }
 
+        # Check for CAPTCHA field
+        captcha_field = soup.select_one('input[name="captcha"]')
+        if captcha_field:
+            logger.warning("CAPTCHA field detected in login form. Requests-based login will likely fail.")
+            logger.warning("Consider using Selenium/Playwright for login with CAPTCHA handling.")
+            # Add a dummy value for CAPTCHA - this won't work but prevents form errors
+            login_data['captcha'] = '123456'
+
         # Look for the submit button to get its name and value
         submit_button = soup.select_one('input[type="submit"]')
         if submit_button:
@@ -198,6 +206,16 @@ def login_to_attendance(session: requests.Session, username: str = USERNAME, pas
             'username': username,
             'password': password,
         }
+
+        # Log all input fields for debugging
+        form = soup.find('form')
+        if form:
+            logger.info(f"Found attendance login form with action: {form.get('action', 'No action')} and method: {form.get('method', 'No method')}")
+            # Log all input fields for debugging
+            for input_field in form.find_all('input'):
+                logger.info(f"Input field: name={input_field.get('name', 'No name')}, type={input_field.get('type', 'No type')}")
+        else:
+            logger.warning("No form found on the attendance login page")
 
         # Look for the submit button to get its name and value
         submit_button = soup.select_one('input[type="submit"]')

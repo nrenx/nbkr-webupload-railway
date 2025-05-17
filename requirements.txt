@@ -4,13 +4,12 @@ beautifulsoup4==4.12.2
 lxml==4.9.3
 # Selenium for web scraping
 selenium>=4.10.0
-# webdriver-manager is commented out as we're using the Playwright Docker image with browsers pre-installed
-# webdriver-manager>=4.0.0
+# webdriver-manager for managing Chrome drivers
+webdriver-manager>=4.0.0
 # Playwright is optional and not used in this deployment
 # playwright>=1.40.0
-# pandas is optional for data export functionality
-# Uncomment if needed
-# pandas>=1.5.3
+# pandas for data export functionality
+pandas>=1.5.3
 
 # Supabase dependencies
 supabase>=1.0.3,<3.0.0
