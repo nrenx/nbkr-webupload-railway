@@ -177,13 +177,7 @@ def job_results(job_id):
 
     return render_template('results.html', job=job)
 
-if __name__ == '__main__':
-    # For local development only
-    import argparse
-
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description='Run the Flask web application')
-    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8000)), help='Port to run the server on')
-    args = parser.parse_args()
-
-    app.run(host='0.0.0.0', port=args.port, debug=True)
+if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
