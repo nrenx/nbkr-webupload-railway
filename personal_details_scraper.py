@@ -178,16 +178,54 @@ class PersonalDetailsScraper:
                 chrome_options.add_argument("--no-sandbox")
                 chrome_options.add_argument("--disable-dev-shm-usage")
 
-                # Check if running on Render.com (environment detection)
+                # Check if running on Render.com or Railway.app (environment detection)
                 is_render = os.environ.get('RENDER') == 'true'
+                is_railway = 'RAILWAY_ENVIRONMENT' in os.environ
+                is_docker = os.path.exists('/.dockerenv')
 
+                # Log the environment for debugging
                 if is_render:
                     logger.info("Running on Render.com, using special Chrome configuration")
-                    # On Render, we need to specify the Chrome binary location
-                    chrome_options.binary_location = "/usr/bin/google-chrome-stable"
-                    # Always use headless mode on Render
+                elif is_railway:
+                    logger.info("Running on Railway.app, using special Chrome configuration")
+                elif is_docker:
+                    logger.info("Running in Docker container, using special Chrome configuration")
+
+                # Common options for all environments
+                chrome_options.add_argument('--no-sandbox')
+                chrome_options.add_argument('--disable-dev-shm-usage')
+                chrome_options.add_argument('--disable-gpu')
+
+                # Configure for cloud/container environments
+                if is_render or is_railway or is_docker:
+                    # Always use headless mode on cloud platforms
                     chrome_options.add_argument('--headless=new')
+
+                    # Try different Chrome binary locations based on platform
+                    if is_render:
+                        # Render.com Chrome locations
+                        chrome_options.binary_location = "/usr/bin/google-chrome-stable"
+                    elif is_railway or is_docker:
+                        # Railway.app and Docker Chrome locations (Playwright image)
+                        chrome_paths = [
+                            "/usr/bin/google-chrome-stable",
+                            "/usr/bin/chromium",
+                            "/usr/bin/chromium-browser",
+                            "/ms-playwright/chromium-1095/chrome-linux/chrome"  # Playwright path
+                        ]
+
+                        # Try to find a valid Chrome binary
+                        for path in chrome_paths:
+                            if os.path.exists(path):
+                                chrome_options.binary_location = path
+                                logger.info(f"Found Chrome binary at: {path}")
+                                break
+
+                    # Additional options for cloud environments
+                    chrome_options.add_argument('--disable-setuid-sandbox')
+                    chrome_options.add_argument('--single-process')
                 elif headless:
+                    # Local headless mode
                     chrome_options.add_argument('--headless=new')
 
                 # Initialize Chrome WebDriver
@@ -215,16 +253,36 @@ class PersonalDetailsScraper:
                         except Exception as e2:
                             logger.error(f"Failed to initialize Chrome WebDriver using default approach: {e2}")
 
-                            # Third try: If on Render, try with specific binary location
-                            if is_render:
-                                try:
-                                    logger.info("Trying Render-specific Chrome configuration")
-                                    # Try with a different binary location
-                                    chrome_options.binary_location = "/opt/render/chrome/chrome"
-                                    self.driver = webdriver.Chrome(options=chrome_options)
-                                    logger.debug("Initialized Chrome WebDriver using Render-specific configuration")
-                                except Exception as e3:
-                                    logger.error(f"Failed to initialize Chrome WebDriver with Render-specific configuration: {e3}")
+                            # Third try: If on Render, Railway, or Docker, try with specific binary locations
+                            if is_render or is_railway or is_docker:
+                                # Try different Chrome binary locations
+                                chrome_locations = [
+                                    "/opt/render/chrome/chrome",                  # Render location
+                                    "/opt/google/chrome/chrome",                  # Another possible location
+                                    "/usr/bin/chromium",                          # Chromium as fallback
+                                    "/usr/bin/chromium-browser",                  # Another Chromium name
+                                    "/usr/bin/google-chrome-stable",              # Standard Linux Chrome
+                                    "/ms-playwright/chromium-1095/chrome-linux/chrome"  # Playwright path
+                                ]
+
+                                success = False
+                                for chrome_path in chrome_locations:
+                                    try:
+                                        if not os.path.exists(chrome_path):
+                                            logger.debug(f"Chrome binary not found at: {chrome_path}")
+                                            continue
+
+                                        logger.info(f"Trying Chrome at location: {chrome_path}")
+                                        chrome_options.binary_location = chrome_path
+                                        self.driver = webdriver.Chrome(options=chrome_options)
+                                        logger.info(f"Successfully initialized Chrome WebDriver using binary at {chrome_path}")
+                                        success = True
+                                        break
+                                    except Exception as e3:
+                                        logger.warning(f"Failed to initialize Chrome WebDriver with binary at {chrome_path}: {e3}")
+
+                                if not success:
+                                    logger.error("Failed to initialize Chrome WebDriver with any known binary location")
                                     # Don't raise, just set driver to None
                                     self.driver = None
                             else:
