@@ -295,8 +295,11 @@ class PersonalDetailsScraper:
                         logger.info("Chrome WebDriver initialized successfully")
                     else:
                         logger.warning("Chrome WebDriver initialization failed, falling back to requests-based scraping")
+                except Exception as e:
+                    logger.error(f"Error initializing Chrome WebDriver: {e}")
+                    self.driver = None
             except Exception as e:
-                logger.error(f"Error initializing Chrome WebDriver: {e}")
+                logger.error(f"Error in Selenium initialization: {e}")
                 self.driver = None
         else:
             logger.warning("Selenium is not available. Using requests-based scraping only.")
