@@ -71,3 +71,7 @@ coverage.xml
 
 # Render specific
 .render-buildpacks
+
+# Railway specific
+# Keep railway.json in version control
+!railway.json
