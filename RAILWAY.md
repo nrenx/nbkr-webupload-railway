@@ -57,7 +57,7 @@ buildCommand = "pip install -r requirements.txt"
 startCommand = "python app.py"
 healthcheckPath = "/"
 healthcheckTimeout = 300
-restartPolicyType = "on-failure"
+restartPolicy = "on-failure"
 restartPolicyMaxRetries = 5
 
 # Resource configuration
