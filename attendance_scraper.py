@@ -175,15 +175,23 @@ class AttendanceScraper:
                 # Check if running on Render.com or Railway.app (environment detection)
                 is_render = os.environ.get('RENDER') == 'true'
                 is_railway = 'RAILWAY_ENVIRONMENT' in os.environ
+                is_docker = os.path.exists('/.dockerenv')
 
                 # Log the environment for debugging
                 if is_render:
                     logger.info("Running on Render.com, using special Chrome configuration")
                 elif is_railway:
                     logger.info("Running on Railway.app, using special Chrome configuration")
+                elif is_docker:
+                    logger.info("Running in Docker container, using special Chrome configuration")
 
-                # Configure for cloud environments
-                if is_render or is_railway:
+                # Common options for all environments
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--disable-gpu')
+
+                # Configure for cloud/container environments
+                if is_render or is_railway or is_docker:
                     # Always use headless mode on cloud platforms
                     options.add_argument('--headless=new')
 
@@ -191,13 +199,24 @@ class AttendanceScraper:
                     if is_render:
                         # Render.com Chrome locations
                         options.binary_location = "/usr/bin/google-chrome-stable"
-                    elif is_railway:
-                        # Railway.app Chrome locations
-                        options.binary_location = "/usr/bin/google-chrome-stable"
+                    elif is_railway or is_docker:
+                        # Railway.app and Docker Chrome locations (Playwright image)
+                        chrome_paths = [
+                            "/usr/bin/google-chrome-stable",
+                            "/usr/bin/chromium",
+                            "/usr/bin/chromium-browser",
+                            "/ms-playwright/chromium-1095/chrome-linux/chrome"  # Playwright path
+                        ]
+
+                        # Try to find a valid Chrome binary
+                        for path in chrome_paths:
+                            if os.path.exists(path):
+                                options.binary_location = path
+                                logger.info(f"Found Chrome binary at: {path}")
+                                break
 
                     # Additional options for cloud environments
                     options.add_argument('--disable-setuid-sandbox')
-                    options.add_argument('--disable-dev-shm-usage')
                     options.add_argument('--single-process')
                 elif self.headless:
                     # Local headless mode
@@ -242,23 +261,29 @@ class AttendanceScraper:
                         except Exception as e2:
                             logger.error(f"Failed to initialize Chrome WebDriver using default approach: {e2}")
 
-                            # Third try: If on Render or Railway, try with specific binary locations
-                            if is_render or is_railway:
+                            # Third try: If on Render, Railway, or Docker, try with specific binary locations
+                            if is_render or is_railway or is_docker:
                                 # Try different Chrome binary locations
                                 chrome_locations = [
-                                    "/opt/render/chrome/chrome",  # Render location
-                                    "/opt/google/chrome/chrome",  # Another possible location
-                                    "/usr/bin/chromium",          # Chromium as fallback
-                                    "/usr/bin/chromium-browser",  # Another Chromium name
+                                    "/opt/render/chrome/chrome",                  # Render location
+                                    "/opt/google/chrome/chrome",                  # Another possible location
+                                    "/usr/bin/chromium",                          # Chromium as fallback
+                                    "/usr/bin/chromium-browser",                  # Another Chromium name
+                                    "/usr/bin/google-chrome-stable",              # Standard Linux Chrome
+                                    "/ms-playwright/chromium-1095/chrome-linux/chrome"  # Playwright path
                                 ]
 
                                 success = False
                                 for chrome_path in chrome_locations:
                                     try:
+                                        if not os.path.exists(chrome_path):
+                                            logger.debug(f"Chrome binary not found at: {chrome_path}")
+                                            continue
+
                                         logger.info(f"Trying Chrome at location: {chrome_path}")
                                         options.binary_location = chrome_path
                                         self.driver = webdriver.Chrome(options=options)
-                                        logger.debug(f"Initialized Chrome WebDriver using binary at {chrome_path}")
+                                        logger.info(f"Successfully initialized Chrome WebDriver using binary at {chrome_path}")
                                         success = True
                                         break
                                     except Exception as e3:
