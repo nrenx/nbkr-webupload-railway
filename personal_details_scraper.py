@@ -936,7 +936,17 @@ class PersonalDetailsScraper:
                     return None
 
                 form_action = form.get('action', '')
-                form_url = PERSONAL_DETAILS_URL if not form_action else form_action
+                # Make sure the form URL is absolute
+                if not form_action:
+                    form_url = PERSONAL_DETAILS_URL
+                elif form_action.startswith('http'):
+                    form_url = form_action
+                else:
+                    # Handle relative URLs by joining with the base URL
+                    from urllib.parse import urljoin
+                    base_url = "http://103.203.175.90:94/attendance/"
+                    form_url = urljoin(base_url, form_action)
+                    logger.info(f"Converted relative URL '{form_action}' to absolute URL '{form_url}'")
 
                 # Find all checkboxes
                 checkboxes = soup.select('input[type="checkbox"]')
@@ -1041,7 +1051,17 @@ class PersonalDetailsScraper:
                                         form = soup.select_one('form')
                                         if form:
                                             form_action = form.get('action', '')
-                                            form_url = PERSONAL_DETAILS_URL if not form_action else form_action
+                                            # Make sure the form URL is absolute
+                                            if not form_action:
+                                                form_url = PERSONAL_DETAILS_URL
+                                            elif form_action.startswith('http'):
+                                                form_url = form_action
+                                            else:
+                                                # Handle relative URLs by joining with the base URL
+                                                from urllib.parse import urljoin
+                                                base_url = "http://103.203.175.90:94/attendance/"
+                                                form_url = urljoin(base_url, form_action)
+                                                logger.info(f"Converted relative URL '{form_action}' to absolute URL '{form_url}'")
 
                                             # Extract all hidden fields from the new form
                                             hidden_inputs = form.select('input[type="hidden"]')
