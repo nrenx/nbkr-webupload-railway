@@ -79,6 +79,16 @@ def login(session: requests.Session, username: str = USERNAME, password: str = P
         # Parse the login page
         soup = BeautifulSoup(response.text, 'html.parser')
 
+        # Log the form structure for debugging
+        form = soup.find('form')
+        if form:
+            logger.info(f"Found login form with action: {form.get('action', 'No action')} and method: {form.get('method', 'No method')}")
+            # Log all input fields for debugging
+            for input_field in form.find_all('input'):
+                logger.info(f"Input field: name={input_field.get('name', 'No name')}, type={input_field.get('type', 'No type')}")
+        else:
+            logger.warning("No form found on the login page")
+
         # Extract CSRF token if present (adjust selector based on actual page)
         csrf_token = None
         csrf_input = soup.select_one('input[name="csrf_token"]')
@@ -105,10 +115,29 @@ def login(session: requests.Session, username: str = USERNAME, password: str = P
         if csrf_token:
             login_data['csrf_token'] = csrf_token
 
+        # Get the form action URL if available
+        form_action = None
+        if form and form.get('action'):
+            form_action = form.get('action')
+            # If it's a relative URL, make it absolute
+            if not form_action.startswith('http'):
+                if form_action.startswith('/'):
+                    form_action = f"{BASE_URL}{form_action}"
+                else:
+                    form_action = f"{BASE_URL}/{form_action}"
+            logger.info(f"Using form action URL: {form_action}")
+
+        # Use the form action URL if available, otherwise use the default LOGIN_URL
+        post_url = form_action if form_action else LOGIN_URL
+
         # Submit the login form
-        logger.info("Submitting login form...")
-        login_response = session.post(LOGIN_URL, data=login_data)
+        logger.info(f"Submitting login form to {post_url}...")
+        login_response = session.post(post_url, data=login_data)
         login_response.raise_for_status()
+
+        # Log the response for debugging
+        logger.info(f"Login response status code: {login_response.status_code}")
+        logger.info(f"Login response URL: {login_response.url}")
 
         # Check if login was successful by checking if we're redirected away from login page
         current_url = login_response.url
@@ -116,8 +145,17 @@ def login(session: requests.Session, username: str = USERNAME, password: str = P
             logger.info("Login successful")
             return True, ""
         else:
-            logger.warning("Login failed - incorrect credentials or form fields")
-            return False, "Login failed - please check your credentials in config.py (USERNAME and PASSWORD variables). These credentials change frequently."
+            # Try to extract error message from the response
+            error_soup = BeautifulSoup(login_response.text, 'html.parser')
+            error_msg = "Login failed - please check your credentials in config.py (USERNAME and PASSWORD variables). These credentials change frequently."
+
+            # Look for error messages in common locations
+            error_elem = error_soup.select_one('.error') or error_soup.select_one('.alert') or error_soup.select_one('#error-message')
+            if error_elem and error_elem.text.strip():
+                error_msg = f"Login failed: {error_elem.text.strip()}"
+
+            logger.warning(f"Login failed - {error_msg}")
+            return False, error_msg
 
     except requests.exceptions.RequestException as e:
         error_msg = f"Error during login: {str(e)}"
@@ -145,6 +183,16 @@ def login_to_attendance(session: requests.Session, username: str = USERNAME, pas
         # Parse the login page
         soup = BeautifulSoup(response.text, 'html.parser')
 
+        # Log the form structure for debugging
+        form = soup.find('form')
+        if form:
+            logger.info(f"Found attendance login form with action: {form.get('action', 'No action')} and method: {form.get('method', 'No method')}")
+            # Log all input fields for debugging
+            for input_field in form.find_all('input'):
+                logger.info(f"Input field: name={input_field.get('name', 'No name')}, type={input_field.get('type', 'No type')}")
+        else:
+            logger.warning("No form found on the attendance login page")
+
         # Prepare login data - using the field names from the actual form
         login_data = {
             'username': username,
@@ -160,10 +208,29 @@ def login_to_attendance(session: requests.Session, username: str = USERNAME, pas
                 login_data[name] = value
                 logger.info(f"Found submit button: {name}={value}")
 
+        # Get the form action URL if available
+        form_action = None
+        if form and form.get('action'):
+            form_action = form.get('action')
+            # If it's a relative URL, make it absolute
+            if not form_action.startswith('http'):
+                if form_action.startswith('/'):
+                    form_action = f"{BASE_URL}{form_action}"
+                else:
+                    form_action = f"{BASE_URL}/{form_action}"
+            logger.info(f"Using form action URL: {form_action}")
+
+        # Use the form action URL if available, otherwise use the default ATTENDANCE_LOGIN_URL
+        post_url = form_action if form_action else ATTENDANCE_LOGIN_URL
+
         # Submit the login form
-        logger.info("Submitting attendance login form...")
-        login_response = session.post(ATTENDANCE_LOGIN_URL, data=login_data)
+        logger.info(f"Submitting attendance login form to {post_url}...")
+        login_response = session.post(post_url, data=login_data)
         login_response.raise_for_status()
+
+        # Log the response for debugging
+        logger.info(f"Attendance login response status code: {login_response.status_code}")
+        logger.info(f"Attendance login response URL: {login_response.url}")
 
         # Check if login was successful by checking if we're redirected away from login page
         current_url = login_response.url
@@ -171,8 +238,17 @@ def login_to_attendance(session: requests.Session, username: str = USERNAME, pas
             logger.info("Attendance login successful")
             return True, ""
         else:
-            logger.warning("Attendance login failed - incorrect credentials or form fields")
-            return False, "Attendance login failed - please check your credentials in config.py (USERNAME and PASSWORD variables). These credentials change frequently."
+            # Try to extract error message from the response
+            error_soup = BeautifulSoup(login_response.text, 'html.parser')
+            error_msg = "Attendance login failed - please check your credentials in config.py (USERNAME and PASSWORD variables). These credentials change frequently."
+
+            # Look for error messages in common locations
+            error_elem = error_soup.select_one('.error') or error_soup.select_one('.alert') or error_soup.select_one('#error-message')
+            if error_elem and error_elem.text.strip():
+                error_msg = f"Attendance login failed: {error_elem.text.strip()}"
+
+            logger.warning(f"Attendance login failed - {error_msg}")
+            return False, error_msg
 
     except requests.exceptions.RequestException as e:
         error_msg = f"Error during attendance login: {str(e)}"

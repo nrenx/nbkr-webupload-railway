@@ -172,18 +172,38 @@ class AttendanceScraper:
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-dev-shm-usage')
 
-                # Check if running on Render.com (environment detection)
+                # Check if running on Render.com or Railway.app (environment detection)
                 is_render = os.environ.get('RENDER') == 'true'
+                is_railway = 'RAILWAY_ENVIRONMENT' in os.environ
 
+                # Log the environment for debugging
                 if is_render:
                     logger.info("Running on Render.com, using special Chrome configuration")
-                    # On Render, we need to specify the Chrome binary location
-                    options.binary_location = "/usr/bin/google-chrome-stable"
-                    # Always use headless mode on Render
+                elif is_railway:
+                    logger.info("Running on Railway.app, using special Chrome configuration")
+
+                # Configure for cloud environments
+                if is_render or is_railway:
+                    # Always use headless mode on cloud platforms
                     options.add_argument('--headless=new')
+
+                    # Try different Chrome binary locations based on platform
+                    if is_render:
+                        # Render.com Chrome locations
+                        options.binary_location = "/usr/bin/google-chrome-stable"
+                    elif is_railway:
+                        # Railway.app Chrome locations
+                        options.binary_location = "/usr/bin/google-chrome-stable"
+
+                    # Additional options for cloud environments
+                    options.add_argument('--disable-setuid-sandbox')
+                    options.add_argument('--disable-dev-shm-usage')
+                    options.add_argument('--single-process')
                 elif self.headless:
+                    # Local headless mode
                     options.add_argument('--headless=new')
                 else:
+                    # Local non-headless mode
                     # Make sure the browser window is visible
                     options.add_argument('--start-maximized')
                     options.add_argument('--disable-extensions')
@@ -222,17 +242,31 @@ class AttendanceScraper:
                         except Exception as e2:
                             logger.error(f"Failed to initialize Chrome WebDriver using default approach: {e2}")
 
-                            # Third try: If on Render, try with specific binary location
-                            if is_render:
-                                try:
-                                    logger.info("Trying Render-specific Chrome configuration")
-                                    # Try with a different binary location
-                                    options.binary_location = "/opt/render/chrome/chrome"
-                                    self.driver = webdriver.Chrome(options=options)
-                                    logger.debug("Initialized Chrome WebDriver using Render-specific configuration")
-                                except Exception as e3:
-                                    logger.error(f"Failed to initialize Chrome WebDriver with Render-specific configuration: {e3}")
-                                    raise
+                            # Third try: If on Render or Railway, try with specific binary locations
+                            if is_render or is_railway:
+                                # Try different Chrome binary locations
+                                chrome_locations = [
+                                    "/opt/render/chrome/chrome",  # Render location
+                                    "/opt/google/chrome/chrome",  # Another possible location
+                                    "/usr/bin/chromium",          # Chromium as fallback
+                                    "/usr/bin/chromium-browser",  # Another Chromium name
+                                ]
+
+                                success = False
+                                for chrome_path in chrome_locations:
+                                    try:
+                                        logger.info(f"Trying Chrome at location: {chrome_path}")
+                                        options.binary_location = chrome_path
+                                        self.driver = webdriver.Chrome(options=options)
+                                        logger.debug(f"Initialized Chrome WebDriver using binary at {chrome_path}")
+                                        success = True
+                                        break
+                                    except Exception as e3:
+                                        logger.warning(f"Failed to initialize Chrome WebDriver with binary at {chrome_path}: {e3}")
+
+                                if not success:
+                                    logger.error("Failed to initialize Chrome WebDriver with any known binary location")
+                                    # Don't raise, just continue with requests-based approach
                             else:
                                 raise
                 except Exception as e:
