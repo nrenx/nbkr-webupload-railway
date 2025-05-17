@@ -22,7 +22,7 @@ except ImportError:
 
 SUPABASE_URL = supabase_config.SUPABASE_URL
 SUPABASE_KEY = supabase_config.SUPABASE_KEY
-BUCKET_NAME = getattr(supabase_config, "BUCKET_NAME", "demo-usingfastapi")  # Use the bucket from config or default
+BUCKET_NAME = getattr(supabase_config, "BUCKET_NAME", "student_data")  # Use the bucket from config or default
 SOURCE_DIR = getattr(supabase_config, "SOURCE_DIR", "student_details")
 WORKERS = getattr(supabase_config, "WORKERS", 32)
 

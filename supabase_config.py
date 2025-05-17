@@ -13,7 +13,7 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 # Default settings
 DEFAULT_SETTINGS = {
     # Storage settings
-    "bucket": "demo-usingfastapi",
+    "bucket": "student_data",
     "source_dir": "/tmp/student_details",
 
     # Performance settings

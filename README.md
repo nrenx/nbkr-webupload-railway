@@ -94,7 +94,7 @@ SUPABASE_KEY = "your-supabase-key"
 # Default settings
 DEFAULT_SETTINGS = {
     # Storage settings
-    "bucket": "demo-usingfastapi",
+    "bucket": "student_data",
     "source_dir": "/tmp/student_details",
 
     # Performance settings

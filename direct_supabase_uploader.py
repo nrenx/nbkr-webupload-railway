@@ -39,7 +39,7 @@ logger = logging.getLogger("direct_supabase_uploader")
 # Supabase configuration
 SUPABASE_URL = supabase_config.SUPABASE_URL
 SUPABASE_KEY = supabase_config.SUPABASE_KEY
-BUCKET_NAME = getattr(supabase_config.DEFAULT_SETTINGS, "bucket", "demo-usingfastapi")
+BUCKET_NAME = getattr(supabase_config.DEFAULT_SETTINGS, "bucket", "student_data")
 SOURCE_DIR = getattr(supabase_config.DEFAULT_SETTINGS, "source_dir", "/tmp/student_details")
 WORKERS = getattr(supabase_config.DEFAULT_SETTINGS, "workers", 32)
 
