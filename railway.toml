@@ -1,0 +1,25 @@
+# Railway.app configuration file
+
+# Environment variables
+[env]
+FORCE_REQUESTS_SCRAPING = "true"
+RAILWAY_MEMORY_LIMIT = "512MB"
+PYTHONUNBUFFERED = "1"
+
+# Build configuration
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+
+# Deploy configuration
+[deploy]
+startCommand = "python app.py"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 5
+
+# Resource configuration
+[resources]
+cpu = 1
+memory = 512

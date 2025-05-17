@@ -43,6 +43,12 @@ logger = logging.getLogger("web_app")
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "nbkrist_student_portal_secret_key")
 
+# Check if running on Railway and set environment variables
+if 'RAILWAY_ENVIRONMENT' in os.environ:
+    # Force requests-based scraping on Railway to reduce memory usage
+    os.environ['FORCE_REQUESTS_SCRAPING'] = 'true'
+    logger.info("Running on Railway, forcing requests-based scraping to reduce memory usage")
+
 # Initialize the TaskMaster
 task_master = TaskMaster()
 
@@ -80,21 +86,29 @@ def submit_job():
         return jsonify({"error": "No scripts selected"}), 400
 
     # Create a new job
+    params = {
+        "username": username,
+        "password": password,
+        "academic_year": academic_year,
+        "semester": semester,
+        "branch": branch,
+        "section": section,
+        "data_dir": str(TEMP_DATA_DIR),
+        "headless": True,  # Always use headless mode
+        "workers": 1,  # Use single worker for stability
+        "max_retries": 5,  # Increase retries for better reliability
+        "timeout": 60,  # Increase timeout for slower connections
+    }
+
+    # Add Railway-specific parameters
+    if 'RAILWAY_ENVIRONMENT' in os.environ:
+        # Use lower memory settings on Railway
+        params["force_requests"] = True
+        logger.info("Adding force_requests=True parameter for Railway environment")
+
     job = task_master.create_job(
         scripts=selected_scripts,
-        params={
-            "username": username,
-            "password": password,
-            "academic_year": academic_year,
-            "semester": semester,
-            "branch": branch,
-            "section": section,
-            "data_dir": str(TEMP_DATA_DIR),
-            "headless": True,  # Always use headless mode
-            "workers": 1,  # Use single worker for stability
-            "max_retries": 5,  # Increase retries for better reliability
-            "timeout": 60,  # Increase timeout for slower connections
-        }
+        params=params
     )
 
     # Start the job (TaskMaster will handle queueing)

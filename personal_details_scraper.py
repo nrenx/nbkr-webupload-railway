@@ -169,15 +169,6 @@ class PersonalDetailsScraper:
         # Initialize Selenium if available
         if SELENIUM_AVAILABLE:
             try:
-                logger.info(f"Initializing personal details scraper in {'headless' if headless else 'visible'} mode")
-                chrome_options = Options()
-
-                # Common options for both headless and non-headless mode
-                chrome_options.add_argument("--window-size=1920,1080")
-                chrome_options.add_argument("--disable-gpu")
-                chrome_options.add_argument("--no-sandbox")
-                chrome_options.add_argument("--disable-dev-shm-usage")
-
                 # Check if running on Render.com or Railway.app (environment detection)
                 is_render = os.environ.get('RENDER') == 'true'
                 is_railway = 'RAILWAY_ENVIRONMENT' in os.environ
@@ -188,13 +179,24 @@ class PersonalDetailsScraper:
                     logger.info("Running on Render.com, using special Chrome configuration")
                 elif is_railway:
                     logger.info("Running on Railway.app, using special Chrome configuration")
+
+                    # Check if we should force requests-based scraping on Railway
+                    force_requests = os.environ.get('FORCE_REQUESTS_SCRAPING', 'true').lower() == 'true'
+                    if force_requests:
+                        logger.info("Forcing requests-based scraping on Railway to reduce memory usage")
+                        self.driver = None
+                        return
                 elif is_docker:
                     logger.info("Running in Docker container, using special Chrome configuration")
 
-                # Common options for all environments
-                chrome_options.add_argument('--no-sandbox')
-                chrome_options.add_argument('--disable-dev-shm-usage')
-                chrome_options.add_argument('--disable-gpu')
+                logger.info(f"Initializing personal details scraper in {'headless' if headless else 'visible'} mode")
+                chrome_options = Options()
+
+                # Common options for both headless and non-headless mode
+                chrome_options.add_argument("--window-size=1920,1080")
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
 
                 # Configure for cloud/container environments
                 if is_render or is_railway or is_docker:
@@ -224,6 +226,64 @@ class PersonalDetailsScraper:
                     # Additional options for cloud environments
                     chrome_options.add_argument('--disable-setuid-sandbox')
                     chrome_options.add_argument('--single-process')
+
+                    # Extra memory-saving options for Railway specifically
+                    if is_railway:
+                        logger.info("Adding extra memory-saving options for Railway environment")
+                        chrome_options.add_argument('--disable-dev-shm-usage')
+                        chrome_options.add_argument('--disable-extensions')
+                        chrome_options.add_argument('--disable-gpu')
+                        chrome_options.add_argument('--disable-infobars')
+                        chrome_options.add_argument('--disable-notifications')
+                        chrome_options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')
+                        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+                        chrome_options.add_argument('--disable-web-security')
+                        chrome_options.add_argument('--no-sandbox')
+                        chrome_options.add_argument('--mute-audio')
+                        chrome_options.add_argument('--no-first-run')
+                        chrome_options.add_argument('--no-default-browser-check')
+                        chrome_options.add_argument('--no-zygote')
+                        chrome_options.add_argument('--ignore-certificate-errors')
+                        chrome_options.add_argument('--window-size=800,600')  # Smaller window size
+                        chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # Disable images
+
+                        # Set low memory limits
+                        chrome_options.add_argument('--js-flags=--max-old-space-size=128')  # Limit JS memory
+
+                        # Add preferences to reduce memory usage
+                        prefs = {
+                            'profile.default_content_setting_values': {
+                                'images': 2,  # Disable images
+                                'plugins': 2,  # Disable plugins
+                                'popups': 2,  # Disable popups
+                                'geolocation': 2,  # Disable geolocation
+                                'notifications': 2,  # Disable notifications
+                                'auto_select_certificate': 2,  # Disable auto select certificate
+                                'fullscreen': 2,  # Disable fullscreen
+                                'mouselock': 2,  # Disable mouselock
+                                'mixed_script': 2,  # Disable mixed script
+                                'media_stream': 2,  # Disable media stream
+                                'media_stream_mic': 2,  # Disable media stream mic
+                                'media_stream_camera': 2,  # Disable media stream camera
+                                'protocol_handlers': 2,  # Disable protocol handlers
+                                'ppapi_broker': 2,  # Disable ppapi broker
+                                'automatic_downloads': 2,  # Disable automatic downloads
+                                'midi_sysex': 2,  # Disable midi sysex
+                                'push_messaging': 2,  # Disable push messaging
+                                'ssl_cert_decisions': 2,  # Disable SSL cert decisions
+                                'metro_switch_to_desktop': 2,  # Disable metro switch to desktop
+                                'protected_media_identifier': 2,  # Disable protected media identifier
+                                'app_banner': 2,  # Disable app banner
+                                'site_engagement': 2,  # Disable site engagement
+                                'durable_storage': 2  # Disable durable storage
+                            },
+                            'disk-cache-size': 4096,  # Small disk cache
+                            'profile.managed_default_content_settings.images': 2  # Disable images
+                        }
+                        chrome_options.add_experimental_option('prefs', prefs)
+
+                        # Log that we're using ultra-lightweight mode
+                        logger.info("Using ultra-lightweight mode for Railway environment")
                 elif headless:
                     # Local headless mode
                     chrome_options.add_argument('--headless=new')
@@ -482,33 +542,61 @@ class PersonalDetailsScraper:
                     return BeautifulSoup(page_source, 'html.parser')
                 else:
                     logger.warning(f"Navigation to personal details page failed - redirected to {self.driver.current_url}")
-                    return None
+                    # Fall back to requests-based approach
+                    logger.info("Falling back to requests-based approach")
+                    self.driver = None  # Disable Selenium for future calls
+
+            # Use requests as fallback or primary method
+            logger.info(f"Navigating to personal details page using requests: {PERSONAL_DETAILS_URL}")
+
+            # Make sure we have a valid session
+            if not hasattr(self, 'session') or self.session is None:
+                self.session = create_session()
+
+            # Try to get the page with retries
+            max_retries = 3
+            retry_count = 0
+            while retry_count < max_retries:
+                try:
+                    response = self.session.get(PERSONAL_DETAILS_URL, timeout=self.timeout)
+                    response.raise_for_status()
+                    break
+                except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        logger.error(f"Failed to get personal details page after {max_retries} retries: {e}")
+                        return None
+                    logger.warning(f"Error getting personal details page (attempt {retry_count}/{max_retries}): {e}")
+                    time.sleep(2)  # Wait before retrying
+
+            # Parse the HTML content
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Check if we're on the correct page by looking for specific elements
+            # that would indicate we're on the personal details page
+            form_elements = soup.select('form')
+            select_elements = soup.select('select')
+
+            # If we find form elements and select dropdowns, we're likely on the right page
+            if form_elements and select_elements:
+                logger.info("Successfully navigated to personal details page using requests")
+                return soup
             else:
-                # Use requests as fallback
-                logger.info(f"Navigating to personal details page using requests: {PERSONAL_DETAILS_URL}")
-                response = self.session.get(PERSONAL_DETAILS_URL)
-                response.raise_for_status()
+                # Check if we're on the login page and need to re-authenticate
+                if "login" in response.url.lower() or "login" in soup.text.lower():
+                    logger.warning("Redirected to login page, attempting to re-authenticate")
+                    self.logged_in = False
+                    if self.authenticate():
+                        # Try again after authentication
+                        return self.navigate_to_personal_details_page()
 
-                # Parse the HTML content
-                soup = BeautifulSoup(response.text, 'html.parser')
-
-                # Check if we're on the correct page by looking for specific elements
-                # that would indicate we're on the personal details page
-                form_elements = soup.select('form')
-                select_elements = soup.select('select')
-
-                # If we find form elements and select dropdowns, we're likely on the right page
-                if form_elements and select_elements:
-                    logger.info("Successfully navigated to personal details page using requests")
-                    return soup
-                else:
-                    # Get the URL we were redirected to
-                    current_url = response.url
-                    logger.warning(f"Navigation to personal details page failed - redirected to {current_url}")
-                    # Log the page content for debugging
-                    if self.save_debug:
-                        logger.debug(f"Page content: {response.text[:500]}...")
-                    return None
+                # Get the URL we were redirected to
+                current_url = response.url
+                logger.warning(f"Navigation to personal details page failed - redirected to {current_url}")
+                # Log the page content for debugging
+                if self.save_debug:
+                    logger.debug(f"Page content: {response.text[:500]}...")
+                return None
 
         except Exception as e:
             logger.error(f"Error navigating to personal details page: {e}")
@@ -853,11 +941,37 @@ class PersonalDetailsScraper:
                 checkboxes = soup.select('input[type="checkbox"]')
                 checkbox_names = [checkbox.get('name') for checkbox in checkboxes if checkbox.get('name')]
 
+                # Map the year_of_study to the correct value
+                year_sem_mapping = {
+                    "First": "01",
+                    "First Yr - First Sem": "11",
+                    "First Yr - Second Sem": "12",
+                    "Second Yr - First Sem": "21",
+                    "Second Yr - Second Sem": "22",
+                    "Third Yr - First Sem": "31",
+                    "Third Yr - Second Sem": "32",
+                    "Final Yr - First Sem": "41",
+                    "Final Yr - Second Sem": "42"
+                }
+
+                # Map the branch to the correct value
+                branch_mapping = {
+                    "MECH": "7",
+                    "CSE": "5",
+                    "ECE": "4",
+                    "EEE": "2",
+                    "CIVIL": "11",
+                    "IT": "22",
+                    "AI_DS": "23",
+                    "CSE_DS": "32",
+                    "CSE_AIML": "33"
+                }
+
                 # Prepare form data
                 form_data = {
                     'acadYear': academic_year,
-                    'yearSem': year_of_study,
-                    'branch': branch,
+                    'yearSem': year_sem_mapping.get(year_of_study, year_of_study),
+                    'branch': branch_mapping.get(branch, branch),
                     'section': section,
                 }
 
@@ -865,26 +979,111 @@ class PersonalDetailsScraper:
                 for checkbox_name in checkbox_names:
                     form_data[checkbox_name] = 'on'
 
+                # Add specific checkboxes for additional fields
+                if 'chkOterhFields[]' not in form_data:
+                    form_data['chkOterhFields[]'] = [
+                        'Parent Name~fathersname',
+                        'Parent Mobile~mobile',
+                        'Student Mobile~studentMobile',
+                        'Aadhaar~aadhaar'
+                    ]
+
                 # Add the submit button value
                 form_data['submit'] = 'Get List of RollNos'
 
-                # Submit the form
-                response = self.session.post(form_url, data=form_data)
-                response.raise_for_status()
+                # Extract all hidden fields from the form
+                hidden_inputs = form.select('input[type="hidden"]')
+                for hidden_input in hidden_inputs:
+                    name = hidden_input.get('name')
+                    value = hidden_input.get('value')
+                    if name and name not in form_data:
+                        form_data[name] = value
 
-                # Parse the response
-                result_soup = BeautifulSoup(response.text, 'html.parser')
+                # Submit the form with retries
+                max_retries = 3
+                retry_count = 0
+                while retry_count < max_retries:
+                    try:
+                        logger.info(f"Submitting form with data: {form_data} (attempt {retry_count + 1}/{max_retries})")
+                        response = self.session.post(form_url, data=form_data, timeout=self.timeout)
+                        response.raise_for_status()
 
-                # Check if the form submission was successful by looking for tables
-                tables = result_soup.select('table')
-                if tables:
-                    logger.info("Form submitted successfully using requests")
-                    return result_soup
-                else:
-                    logger.warning("Form submission failed - no tables found in the response")
-                    if self.save_debug:
-                        logger.debug(f"Response content: {response.text[:500]}...")
-                    return None
+                        # Parse the response
+                        result_soup = BeautifulSoup(response.text, 'html.parser')
+
+                        # Check if the form submission was successful by looking for tables
+                        tables = result_soup.select('table')
+                        if tables:
+                            # Check if any table has more than 1 row (header + at least one data row)
+                            has_data = False
+                            for table in tables:
+                                rows = table.select('tr')
+                                if len(rows) > 1:
+                                    has_data = True
+                                    break
+
+                            if has_data:
+                                logger.info("Form submitted successfully using requests - found tables with data")
+                                return result_soup
+                            else:
+                                logger.warning("Form submitted but no data rows found in tables")
+                        else:
+                            # Check if we're on the login page and need to re-authenticate
+                            if "login" in response.url.lower() or "login" in result_soup.text.lower():
+                                logger.warning("Redirected to login page, attempting to re-authenticate")
+                                self.logged_in = False
+                                if self.authenticate():
+                                    # Try again with a fresh page
+                                    soup = self.navigate_to_personal_details_page()
+                                    if soup:
+                                        # Update the form with the new page
+                                        form = soup.select_one('form')
+                                        if form:
+                                            form_action = form.get('action', '')
+                                            form_url = PERSONAL_DETAILS_URL if not form_action else form_action
+
+                                            # Extract all hidden fields from the new form
+                                            hidden_inputs = form.select('input[type="hidden"]')
+                                            for hidden_input in hidden_inputs:
+                                                name = hidden_input.get('name')
+                                                value = hidden_input.get('value')
+                                                if name:
+                                                    form_data[name] = value
+
+                                        retry_count += 1
+                                        continue  # Retry the form submission
+
+                            logger.warning("Form submission failed - no tables found in the response")
+
+                            # Log the response for debugging
+                            if self.save_debug:
+                                logger.debug(f"Response content: {response.text[:500]}...")
+
+                            # Try a different approach - sometimes we need to adjust the form data
+                            if retry_count < max_retries - 1:
+                                # Try with different form data combinations
+                                if retry_count == 0:
+                                    # Try with original values instead of mapped values
+                                    form_data['yearSem'] = year_of_study
+                                    form_data['branch'] = branch
+                                elif retry_count == 1:
+                                    # Try with a different submit button value
+                                    form_data['submit'] = 'Submit'
+
+                                retry_count += 1
+                                continue
+
+                            return None
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count >= max_retries:
+                            logger.error(f"Error submitting form after {max_retries} retries: {e}")
+                            return None
+                        logger.warning(f"Error submitting form (attempt {retry_count}/{max_retries}): {e}")
+                        time.sleep(2)  # Wait before retrying
+
+                # If we get here, all retries failed
+                return None
 
         except Exception as e:
             logger.error(f"Error submitting form: {e}")
@@ -1551,6 +1750,7 @@ def main():
     parser.add_argument('--semester', help='Alias for year_of_study - for compatibility with web interface')
     parser.add_argument('--max-retries', type=int, help='Maximum number of retries for network errors')
     parser.add_argument('--timeout', type=int, help='Timeout in seconds for waiting for elements')
+    parser.add_argument('--force-requests', action='store_true', help='Force requests-based scraping (no Selenium)')
 
     args = parser.parse_args()
 
@@ -1570,6 +1770,11 @@ def main():
     # Use max_retries and timeout from command line if provided
     max_retries = args.max_retries if args.max_retries is not None else DEFAULT_SETTINGS['max_retries']
     timeout = args.timeout if args.timeout is not None else DEFAULT_SETTINGS['timeout']
+
+    # If force_requests is specified, set the environment variable
+    if args.force_requests:
+        logger.info("Forcing requests-based scraping (no Selenium)")
+        os.environ['FORCE_REQUESTS_SCRAPING'] = 'true'
 
     scraper = PersonalDetailsScraper(
         username=username,

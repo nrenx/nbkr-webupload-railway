@@ -511,6 +511,11 @@ class TaskMaster:
             cmd.append("--timeout")
             cmd.append("60")
 
+            # Add force_requests parameter if specified
+            if job.params.get("force_requests", False):
+                cmd.append("--force-requests")
+                job.add_log("Using force-requests mode to reduce memory usage")
+
             # Log the command
             job.add_log(f"Running command: {' '.join(cmd)}")
 
