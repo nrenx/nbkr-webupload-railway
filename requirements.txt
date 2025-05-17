@@ -24,8 +24,8 @@ tqdm==4.66.1
 
 # Web application
 flask>=2.0.0
-# gunicorn is commented out as Railway may handle process management differently
-# gunicorn>=20.1.0
+# Railway needs gunicorn to start the application
+gunicorn>=20.1.0
 Werkzeug>=2.0.0
 
 # For job management

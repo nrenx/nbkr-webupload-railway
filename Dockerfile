@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install gunicorn
 
 # Copy the rest of the application
 COPY . .
@@ -18,4 +18,4 @@ RUN chmod +x *.py
 ENV PYTHONUNBUFFERED=1
 
 # Run the application
-CMD gunicorn app:app --bind 0.0.0.0:${PORT:-10000}
+CMD gunicorn app:app --bind 0.0.0.0:$PORT
