@@ -13,11 +13,16 @@ PERSONAL_DETAILS_URL = "http://103.203.175.90:94/attendance/selectionForRollNos.
 # Authentication credentials
 # NOTE: These credentials change frequently. Update them as needed.
 # Current credentials as of May 2025
-# Try these credentials if the current ones don't work:
-# USERNAME = "pds"
-# PASSWORD = "sarwagnya"
-USERNAME = "sumayya"
-PASSWORD = "09041994"
+# Try different credentials if the current ones don't work
+# The website now uses CAPTCHA which makes automated login more difficult
+
+# First set of credentials
+USERNAME = "pds"
+PASSWORD = "sarwagnya"
+
+# Second set of credentials (commented out)
+# USERNAME = "sumayya"
+# PASSWORD = "09041994"
 
 # Default academic years (newest to oldest)
 DEFAULT_ACADEMIC_YEARS = [
