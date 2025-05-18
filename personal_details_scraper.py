@@ -1013,6 +1013,9 @@ class PersonalDetailsScraper:
                 # Submit the form with retries
                 max_retries = 3
                 retry_count = 0
+                no_data_count = 0
+                max_no_data_retries = 2  # Maximum number of times to retry when no data is found
+
                 while retry_count < max_retries:
                     try:
                         logger.info(f"Submitting form with data: {form_data} (attempt {retry_count + 1}/{max_retries})")
@@ -1038,6 +1041,13 @@ class PersonalDetailsScraper:
                                 return result_soup
                             else:
                                 logger.warning("Form submitted but no data rows found in tables")
+                                no_data_count += 1
+
+                                # If we've tried multiple times with no data, assume there's no data for this combination
+                                if no_data_count >= max_no_data_retries:
+                                    logger.warning(f"No data found after {no_data_count} attempts. Assuming no data exists for this combination.")
+                                    # Return None to indicate no data for this combination
+                                    return None
                         else:
                             # Check if we're on the login page and need to re-authenticate
                             if "login" in response.url.lower() or "login" in result_soup.text.lower():
@@ -1633,12 +1643,44 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
     combinations_with_data = 0
     total_students = 0
 
+    # Add a timeout to prevent the worker from running indefinitely
+    start_time = time.time()
+    max_worker_runtime = args.max_worker_runtime  # Use the command line argument
+    empty_combinations_in_a_row = 0
+    max_empty_combinations = args.max_empty_combinations  # Use the command line argument
+    current_branch = None  # Track the current branch to reset counter when branch changes
+
     while True:
+        # Check if we've been running too long
+        if time.time() - start_time > max_worker_runtime:
+            worker_logger.warning(f"Worker {worker_id}: Exceeded maximum runtime of {max_worker_runtime} seconds. Stopping.")
+            break
+
+        # Check if we've seen too many empty combinations in a row
+        # We'll continue processing but will reset the counter when the branch changes
+        if empty_combinations_in_a_row >= max_empty_combinations:
+            worker_logger.warning(f"Worker {worker_id}: Found {empty_combinations_in_a_row} empty combinations in a row for branch {current_branch}. Will skip until branch changes.")
+            # We don't break here, we'll continue and let the branch change reset the counter
+
         try:
             # Get the next combination from the queue (non-blocking)
             try:
                 combination_index, combination = combination_queue.get(block=False)
                 academic_year, year_of_study, branch, section = combination
+
+                # Reset empty combinations counter when branch changes
+                if branch != current_branch:
+                    if empty_combinations_in_a_row > 0:
+                        worker_logger.info(f"Worker {worker_id}: Changing branch from {current_branch} to {branch}, resetting empty combinations counter")
+                        empty_combinations_in_a_row = 0
+                    current_branch = branch
+                elif empty_combinations_in_a_row >= max_empty_combinations:
+                    # Skip this combination if we've seen too many empty combinations in a row for this branch
+                    worker_logger.warning(f"Worker {worker_id}: Skipping combination for branch {branch} due to too many empty combinations in a row")
+                    # Skip task_done for process mode as multiprocessing.Queue doesn't have this method
+                    if hasattr(combination_queue, 'task_done'):
+                        combination_queue.task_done()
+                    continue
             except queue.Empty:
                 # No more combinations to process
                 worker_logger.info(f"Worker {worker_id}: No more combinations to process. Exiting.")
@@ -1673,9 +1715,14 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
             if not result_soup:
                 worker_logger.warning(f"Worker {worker_id}: Failed to get results for {academic_year}, {year_of_study}, {branch}, {section}")
                 result_queue.put((worker_id, "no_results", combination))
+                # Increment the empty combinations counter
+                empty_combinations_in_a_row += 1
+                worker_logger.warning(f"Worker {worker_id}: Empty combinations in a row: {empty_combinations_in_a_row}/{max_empty_combinations}")
                 # Skip task_done for process mode as multiprocessing.Queue doesn't have this method
                 if hasattr(combination_queue, 'task_done'):
                     combination_queue.task_done()
+                # Add a small delay before continuing to the next combination
+                time.sleep(1)
                 continue
 
             # Extract personal details
@@ -1683,11 +1730,21 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
 
             if not students:
                 worker_logger.warning(f"Worker {worker_id}: No student details found for {academic_year}, {year_of_study}, {branch}, {section}")
+                # Log more details to help diagnose the issue
+                worker_logger.debug(f"Worker {worker_id}: Branch code for {branch} might be causing issues")
                 result_queue.put((worker_id, "no_data", combination))
+                # Increment the empty combinations counter
+                empty_combinations_in_a_row += 1
+                worker_logger.warning(f"Worker {worker_id}: Empty combinations in a row: {empty_combinations_in_a_row}/{max_empty_combinations}")
                 # Skip task_done for process mode as multiprocessing.Queue doesn't have this method
                 if hasattr(combination_queue, 'task_done'):
                     combination_queue.task_done()
+                # Add a small delay before continuing to the next combination
+                time.sleep(1)
                 continue
+
+            # Reset the empty combinations counter since we found data
+            empty_combinations_in_a_row = 0
 
             # Add metadata to each student record
             for student in students:
@@ -1754,10 +1811,12 @@ def main():
     # Additional arguments for controlling the scraping process
     parser.add_argument('--max-combinations', type=int, default=0, help='Maximum number of combinations to try (0 for all)')
     parser.add_argument('--delay', type=float, default=1.0, help='Delay between requests in seconds')
-    parser.add_argument('--skip-empty', action='store_true', help='Skip combinations with no data')
+    parser.add_argument('--skip-empty', action='store_true', default=True, help='Skip combinations with no data (enabled by default)')
+    parser.add_argument('--no-skip-empty', dest='skip_empty', action='store_false', help='Do not skip combinations with no data')
     parser.add_argument('--reverse', action='store_true', help='Reverse the order of combinations (oldest first)')
     parser.add_argument('--only-years', nargs='+', choices=DEFAULT_ACADEMIC_YEARS, help='Only scrape specific academic years')
     parser.add_argument('--only-semesters', nargs='+', choices=DEFAULT_SEMESTERS, help='Only scrape specific semesters')
+    parser.add_argument('--max-empty-combinations', type=int, default=5, help='Maximum number of empty combinations in a row before stopping')
     parser.add_argument('--only-branches', nargs='+', choices=list(BRANCH_CODES.keys()), help='Only scrape specific branches')
     parser.add_argument('--only-sections', nargs='+', choices=DEFAULT_SECTIONS, help='Only scrape specific sections')
 
@@ -1765,6 +1824,7 @@ def main():
     parser.add_argument('--workers', type=int, default=1, help='Number of worker processes/threads for parallel scraping')
     parser.add_argument('--worker-mode', choices=['process', 'thread'], default='process',
                         help='Worker mode: process (separate processes) or thread (separate threads)')
+    parser.add_argument('--max-worker-runtime', type=int, default=3600, help='Maximum runtime in seconds for each worker')
 
     # Add arguments that are passed by the web interface but not used by this script
     # This allows the script to be called with the same arguments as other scraper scripts
@@ -1966,10 +2026,18 @@ def main():
         total_updates = 0
         total_students = 0
         empty_combinations_in_a_row = 0
-        max_empty_combinations = 10  # Stop after this many empty combinations in a row
+        max_empty_combinations = args.max_empty_combinations  # Use the command line argument
+        current_branch = None  # Track the current branch to reset counter when branch changes
 
         for i, (academic_year, year_of_study, branch, section) in enumerate(combinations, 1):
             logger.info(f"Processing combination {i}/{len(combinations)}: {academic_year}, {year_of_study}, {branch}, {section}")
+
+            # Reset empty combinations counter when branch changes
+            if branch != current_branch:
+                if empty_combinations_in_a_row > 0:
+                    logger.info(f"Changing branch from {current_branch} to {branch}, resetting empty combinations counter")
+                    empty_combinations_in_a_row = 0
+                current_branch = branch
 
             # Add delay between requests if specified
             if i > 1 and args.delay > 0:
@@ -2027,18 +2095,20 @@ def main():
                     logger.warning(f"No student details found for {academic_year}, {year_of_study}, {branch}, {section}")
                     empty_combinations_in_a_row += 1
 
-                    # If we've seen too many empty combinations in a row, stop
+                    # If we've seen too many empty combinations in a row, skip to next branch
                     if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
-                        logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row. Stopping.")
-                        break
+                        logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
+                        # Continue to the next iteration, which will be a different branch due to how combinations are generated
+                        continue
             else:
                 logger.warning(f"Failed to select form filters for {academic_year}, {year_of_study}, {branch}, {section}. Skipping.")
                 empty_combinations_in_a_row += 1
 
                 # If we've seen too many empty combinations in a row, stop
                 if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
-                    logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row. Stopping.")
-                    break
+                    logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
+                    # Continue to the next iteration, which will be a different branch due to how combinations are generated
+                    continue
 
         # Print summary
         if total_students > 0:

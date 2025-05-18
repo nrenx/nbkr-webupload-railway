@@ -181,7 +181,12 @@ def api_restart_monitor():
 
 @app.route('/cancel/<job_id>', methods=['POST'])
 def cancel_job(job_id):
-    """Cancel a running job."""
+    """Cancel a running job with PIN protection."""
+    # Check for the admin PIN
+    admin_pin = request.form.get('admin_pin')
+    if admin_pin != '9640':
+        return jsonify({"error": "Invalid admin PIN"}), 403
+
     success = task_master.cancel_job(job_id)
     if not success:
         return jsonify({"error": "Failed to cancel job"}), 400
