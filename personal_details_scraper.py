@@ -1077,31 +1077,7 @@ class PersonalDetailsScraper:
                 while retry_count < max_retries:
                     try:
                         logger.info(f"Submitting form with data: {form_data} (attempt {retry_count + 1}/{max_retries})")
-
-                        # Try different approaches for form submission
-                        if retry_count == 0:
-                            # First attempt: standard POST request
-                            response = self.session.post(form_url, data=form_data, timeout=self.timeout)
-                        elif retry_count == 1:
-                            # Second attempt: add additional headers that might help
-                            headers = {
-                                'Content-Type': 'application/x-www-form-urlencoded',
-                                'Accept': 'text/html,application/xhtml+xml,application/xml',
-                                'Referer': PERSONAL_DETAILS_URL
-                            }
-                            response = self.session.post(form_url, data=form_data, headers=headers, timeout=self.timeout)
-                        else:
-                            # Subsequent attempts: try with different submit button values
-                            form_data_copy = form_data.copy()
-                            if 'submit' in form_data_copy:
-                                if retry_count == 2:
-                                    form_data_copy['submit'] = 'Submit'
-                                elif retry_count == 3:
-                                    form_data_copy['submit'] = 'Get Data'
-                                elif retry_count == 4:
-                                    form_data_copy['submit'] = 'View'
-                            response = self.session.post(form_url, data=form_data_copy, timeout=self.timeout)
-
+                        response = self.session.post(form_url, data=form_data, timeout=self.timeout)
                         response.raise_for_status()
 
                         # Parse the response
@@ -1123,11 +1099,8 @@ class PersonalDetailsScraper:
                         # Debug: Print the HTML content to help diagnose issues
                         html_content = str(result_soup)
                         logger.debug(f"Response HTML length: {len(html_content)} characters")
-
-                        # Log a sample of the HTML content for debugging (especially on Railway)
-                        # This will help us see what's actually being returned
-                        sample_size = min(2000, len(html_content))
-                        logger.debug(f"Response HTML sample (first {sample_size} chars): {html_content[:sample_size]}")
+                        if len(html_content) < 1000:  # Only log small responses to avoid flooding logs
+                            logger.debug(f"Response HTML: {html_content}")
 
                         # Check if there's any content that might indicate success even without tables
                         # Some responses might have data in divs or other elements
@@ -1138,10 +1111,6 @@ class PersonalDetailsScraper:
                             for i, table in enumerate(tables):
                                 rows = table.select('tr')
                                 logger.debug(f"Table {i+1} has {len(rows)} rows")
-
-                                # Log the HTML of the first table to see its structure
-                                if i == 0:
-                                    logger.debug(f"First table HTML: {str(table)[:500]}")
 
                                 if len(rows) > 1:
                                     # Additional check: make sure the rows contain actual data
@@ -1164,32 +1133,14 @@ class PersonalDetailsScraper:
 
                             # Check for any roll number patterns in the page
                             roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
-                            roll_matches = roll_pattern.findall(html_content)
-                            if roll_matches:
-                                logger.debug(f"Found roll number patterns in page: {roll_matches[:5]}")
-                                has_data = True
-
-                            # Check for any table-like structures that might not be actual table elements
-                            if '<tr' in html_content and '<td' in html_content:
-                                logger.debug("Found table-like structure in HTML")
+                            if roll_pattern.search(html_content):
+                                logger.debug("Found roll number pattern in page")
                                 has_data = True
 
                         if has_data:
                             logger.info("Form submitted successfully using requests - found data in response")
                             return result_soup
                         else:
-                            # On Railway, we might need to be more lenient about what constitutes "data"
-                            # Check if the response contains any HTML structure that might be useful
-                            if '<table' in html_content or '<tr' in html_content or '<td' in html_content:
-                                logger.info("Form submitted successfully - found table-like structure in response")
-                                return result_soup
-
-                            # Check if the response contains any roll number patterns
-                            roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
-                            if roll_pattern.search(html_content):
-                                logger.info("Form submitted successfully - found roll number patterns in response")
-                                return result_soup
-
                             logger.warning("Form submitted but no data found in response")
                             no_data_count += 1
 
@@ -1307,63 +1258,21 @@ class PersonalDetailsScraper:
             html_content = str(soup)
             logger.debug(f"HTML content length: {len(html_content)} characters")
 
-            # Log a sample of the HTML content for debugging (especially on Railway)
-            sample_size = min(2000, len(html_content))
-            logger.debug(f"HTML content sample (first {sample_size} chars): {html_content[:sample_size]}")
-
             # Look for roll number patterns in the HTML to confirm data exists
             roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
             roll_matches = roll_pattern.findall(html_content)
             if roll_matches:
                 logger.debug(f"Found {len(roll_matches)} roll number patterns in the HTML: {roll_matches[:5]}")
 
-            # Try multiple approaches to extract data, similar to attendance_scraper.py
-
-            # Approach 1: Try to extract from tables
-            students_from_tables = self.extract_from_tables(soup)
-            if students_from_tables:
-                logger.info(f"Successfully extracted {len(students_from_tables)} student records using table approach")
-                return students_from_tables
-
-            # Approach 2: Try to extract from table-like structures
-            if '<tr' in html_content and '<td' in html_content:
-                logger.info("Found table-like structure in HTML, trying to extract using raw HTML parsing")
-                students_from_raw_html = self.extract_from_raw_html(soup, html_content)
-                if students_from_raw_html:
-                    logger.info(f"Successfully extracted {len(students_from_raw_html)} student records using raw HTML parsing")
-                    return students_from_raw_html
-
-            # Approach 3: If roll numbers were found, try to extract from non-table elements
-            if roll_matches:
-                logger.info(f"Trying to extract from non-table elements with {len(roll_matches)} roll numbers")
-                students_from_non_tables = self.extract_from_non_table_elements(soup, roll_matches)
-                if students_from_non_tables:
-                    logger.info(f"Successfully extracted {len(students_from_non_tables)} student records from non-table elements")
-                    return students_from_non_tables
-
-            # If all approaches failed, log a warning and return an empty list
-            logger.warning("All extraction approaches failed, no student details found")
-            return []
-
-        except Exception as e:
-            logger.error(f"Error extracting personal details: {str(e)}")
-            return []
-
-    def extract_from_tables(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
-        """
-        Extract personal details from tables in the page.
-
-        Args:
-            soup: BeautifulSoup object of the page
-
-        Returns:
-            List of dictionaries containing personal details
-        """
-        try:
             # Find all tables in the page
             tables = soup.select('table')
             if not tables:
                 logger.warning("No tables found in the page")
+
+                # If no tables but we found roll numbers, try to extract from other elements
+                if roll_matches:
+                    logger.info(f"No tables found but detected {len(roll_matches)} roll numbers. Trying alternative extraction.")
+                    return self.extract_from_non_table_elements(soup, roll_matches)
                 return []
 
             # Debug: Print information about each table
@@ -1392,7 +1301,6 @@ class PersonalDetailsScraper:
                     logger.debug(f"Sample link texts: {link_texts}")
 
                     # If links contain roll numbers, this might be the student table
-                    roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
                     if any(roll_pattern.search(link_text) for link_text in link_texts):
                         logger.debug(f"Table {i+1} contains links with roll numbers")
 
@@ -1405,7 +1313,6 @@ class PersonalDetailsScraper:
             # This is typically the largest table with student data
             student_table = None
             max_rows = 0
-            roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
 
             # Try multiple approaches to find the student table
 
@@ -1466,218 +1373,124 @@ class PersonalDetailsScraper:
 
             if not student_table:
                 logger.warning("No student details table found")
+
+                # If no student table but we found roll numbers, try to extract from other elements
+                if roll_matches:
+                    logger.info(f"No student table found but detected {len(roll_matches)} roll numbers. Trying alternative extraction.")
+                    return self.extract_from_non_table_elements(soup, roll_matches)
                 return []
 
-            # Now extract data from the student table
-            return self.extract_data_from_table(student_table)
-
-        except Exception as e:
-            logger.error(f"Error extracting from tables: {str(e)}")
-            return []
-
-    def extract_from_raw_html(self, soup: BeautifulSoup, html_content: str) -> List[Dict[str, Any]]:
-        """
-        Extract personal details by parsing raw HTML for table-like structures.
-
-        Args:
-            soup: BeautifulSoup object of the page
-            html_content: Raw HTML content as string
-
-        Returns:
-            List of dictionaries containing personal details
-        """
-        try:
+            # Extract student details from the table
             students = []
-            roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
+            rows = student_table.select('tr')
 
-            # Try to find all TR elements even if they're not in a proper table
-            tr_elements = soup.find_all('tr')
-            logger.debug(f"Found {len(tr_elements)} TR elements in the HTML")
-
-            if not tr_elements:
-                # If no TR elements found using BeautifulSoup, try regex
-                tr_matches = re.findall(r'<tr[^>]*>(.*?)</tr>', html_content, re.DOTALL)
-                logger.debug(f"Found {len(tr_matches)} TR elements using regex")
-
-                if not tr_matches:
-                    return []
-
-                # Process TR elements found with regex
-                for tr_html in tr_matches:
-                    # Extract TD elements
-                    td_matches = re.findall(r'<td[^>]*>(.*?)</td>', tr_html, re.DOTALL)
-                    if len(td_matches) < 2:  # Need at least roll number and name
-                        continue
-
-                    # Look for roll number in TD elements
-                    roll_number = None
-                    for td_content in td_matches:
-                        roll_match = roll_pattern.search(td_content)
-                        if roll_match:
-                            roll_number = roll_match.group(0)
-                            break
-
-                    if not roll_number:
-                        continue
-
-                    # Create student data dictionary
-                    student_data = {'Roll No': roll_number}
-
-                    # Try to extract other fields
-                    for i, td_content in enumerate(td_matches):
-                        if td_content == roll_number:
-                            continue
-
-                        # Try to determine what this cell represents
-                        if i == 1 or 'name' in td_content.lower():
-                            student_data['Name'] = re.sub(r'<[^>]+>', '', td_content).strip()
-                        elif 'father' in td_content.lower():
-                            student_data['Father Name'] = re.sub(r'<[^>]+>', '', td_content).strip()
-                        elif 'mobile' in td_content.lower() or 'phone' in td_content.lower():
-                            if 'Student Mobile' not in student_data:
-                                student_data['Student Mobile'] = re.sub(r'<[^>]+>', '', td_content).strip()
-                            elif 'Parent Mobile' not in student_data:
-                                student_data['Parent Mobile'] = re.sub(r'<[^>]+>', '', td_content).strip()
-                        elif 'aadhaar' in td_content.lower():
-                            student_data['Aadhaar'] = re.sub(r'<[^>]+>', '', td_content).strip()
-
-                    # Add metadata
-                    student_data['extracted_at'] = datetime.now().isoformat()
-
-                    # Ensure all important fields are present, even if null
-                    important_fields = ['Roll No', 'Name', 'Father Name', 'Parent Mobile', 'Student Mobile', 'Aadhaar']
-                    for field in important_fields:
-                        if field not in student_data:
-                            student_data[field] = None
-
-                    students.append(student_data)
-            else:
-                # Process TR elements found with BeautifulSoup
-                for tr in tr_elements:
-                    # Extract TD elements
-                    td_elements = tr.find_all('td')
-                    if len(td_elements) < 2:  # Need at least roll number and name
-                        continue
-
-                    # Look for roll number in TD elements
-                    roll_number = None
-                    for td in td_elements:
-                        text = td.get_text(strip=True)
-                        roll_match = roll_pattern.search(text)
-                        if roll_match:
-                            roll_number = roll_match.group(0)
-                            break
-
-                    if not roll_number:
-                        continue
-
-                    # Create student data dictionary
-                    student_data = {'Roll No': roll_number}
-
-                    # Try to extract other fields
-                    for i, td in enumerate(td_elements):
-                        text = td.get_text(strip=True)
-                        if text == roll_number:
-                            continue
-
-                        # Try to determine what this cell represents
-                        if i == 1 or 'name' in td.get('class', [''])[0].lower():
-                            student_data['Name'] = text
-                        elif 'father' in td.get('class', [''])[0].lower():
-                            student_data['Father Name'] = text
-                        elif 'mobile' in td.get('class', [''])[0].lower() or 'phone' in td.get('class', [''])[0].lower():
-                            if 'Student Mobile' not in student_data:
-                                student_data['Student Mobile'] = text
-                            elif 'Parent Mobile' not in student_data:
-                                student_data['Parent Mobile'] = text
-                        elif 'aadhaar' in td.get('class', [''])[0].lower():
-                            student_data['Aadhaar'] = text
-
-                    # Add metadata
-                    student_data['extracted_at'] = datetime.now().isoformat()
-
-                    # Ensure all important fields are present, even if null
-                    important_fields = ['Roll No', 'Name', 'Father Name', 'Parent Mobile', 'Student Mobile', 'Aadhaar']
-                    for field in important_fields:
-                        if field not in student_data:
-                            student_data[field] = None
-
-                    students.append(student_data)
-
-            logger.info(f"Extracted {len(students)} student records from raw HTML")
-            return students
-
-        except Exception as e:
-            logger.error(f"Error extracting from raw HTML: {str(e)}")
-            return []
-
-    def extract_data_from_table(self, table: BeautifulSoup) -> List[Dict[str, Any]]:
-        """
-        Extract data from a table that contains student details.
-
-        Args:
-            table: BeautifulSoup object of the table
-
-        Returns:
-            List of dictionaries containing personal details
-        """
-        try:
-            students = []
-            rows = table.select('tr')
-
-            if len(rows) <= 1:  # Need at least a header row and one data row
-                logger.warning("Table has insufficient rows")
-                return []
-
-            # Extract header row to determine column meanings
+            # Check if the first row contains actual headers or if it's the first data row
             header_row = rows[0]
             header_cells = header_row.select('th, td')
-            headers = [cell.get_text(strip=True) for cell in header_cells]
+            header_texts = [cell.get_text(strip=True) for cell in header_cells]
+            logger.debug(f"Found table with first row texts: {header_texts}")
 
-            # Map column indices to field names
-            column_map = {}
-            for i, header in enumerate(headers):
-                header_lower = header.lower()
-                if 'roll' in header_lower or 'id' in header_lower:
-                    column_map[i] = 'Roll No'
-                elif 'name' in header_lower and 'father' not in header_lower and 'parent' not in header_lower:
-                    column_map[i] = 'Name'
-                elif 'father' in header_lower or 'parent name' in header_lower:
-                    column_map[i] = 'Father Name'
-                elif ('mobile' in header_lower or 'phone' in header_lower) and ('student' in header_lower or 'self' in header_lower):
-                    column_map[i] = 'Student Mobile'
-                elif ('mobile' in header_lower or 'phone' in header_lower) and ('parent' in header_lower or 'father' in header_lower):
-                    column_map[i] = 'Parent Mobile'
-                elif 'aadhaar' in header_lower:
-                    column_map[i] = 'Aadhaar'
+            # Check if the first row looks like a header row or a data row
+            # If it contains roll numbers (digits), it's likely a data row
+            is_data_row = any(any(c.isdigit() for c in text) for text in header_texts)
 
-            # Process data rows
-            for row in rows[1:]:  # Skip header row
-                cells = row.select('td, th')
-                if not cells:
+            # If the first row is a data row, use default headers
+            if is_data_row:
+                logger.debug("First row appears to be a data row, using default headers")
+                # Use default headers based on common structure
+                standardized_headers = ['S.No', 'Roll No', 'Name', 'Father Name', 'Parent Mobile', 'Student Mobile', 'Aadhaar']
+                # Adjust the number of headers to match the number of columns
+                if len(header_cells) > len(standardized_headers):
+                    # Add additional columns if needed
+                    for i in range(len(standardized_headers), len(header_cells)):
+                        standardized_headers.append(f"Column_{i+1}")
+                elif len(header_cells) < len(standardized_headers):
+                    # Trim headers if needed
+                    standardized_headers = standardized_headers[:len(header_cells)]
+
+                # Start processing from the first row (don't skip)
+                start_row = 0
+            else:
+                # Clean up headers - remove any empty headers and standardize names
+                cleaned_headers = []
+                for header in header_texts:
+                    if not header.strip():
+                        # Use a placeholder for empty headers
+                        cleaned_headers.append(f"Column_{len(cleaned_headers)+1}")
+                    else:
+                        cleaned_headers.append(header)
+
+                # Map common header variations to standard names
+                header_mapping = {
+                    'sno': 'S.No',
+                    's.no': 'S.No',
+                    'sl.no': 'S.No',
+                    'slno': 'S.No',
+                    'roll no': 'Roll No',
+                    'rollno': 'Roll No',
+                    'roll number': 'Roll No',
+                    'student id': 'Roll No',
+                    'name of the student': 'Name',
+                    'student name': 'Name',
+                    'father name': 'Father Name',
+                    'father\'s name': 'Father Name',
+                    'parent name': 'Father Name',
+                    'phone': 'Phone',
+                    'phone no': 'Phone',
+                    'parent mobile': 'Parent Mobile',
+                    'parent phone': 'Parent Mobile',
+                    'student mobile': 'Student Mobile',
+                    'mobile': 'Mobile',
+                    'mobile no': 'Mobile',
+                    'email': 'Email',
+                    'email id': 'Email',
+                    'aadhaar': 'Aadhaar',
+                    'aadhar': 'Aadhaar',
+                    'aadhaar no': 'Aadhaar'
+                }
+
+                # Standardize headers
+                standardized_headers = []
+                for header in cleaned_headers:
+                    lower_header = header.lower()
+                    if lower_header in header_mapping:
+                        standardized_headers.append(header_mapping[lower_header])
+                    else:
+                        standardized_headers.append(header)
+
+                # Start processing from the second row (skip header)
+                start_row = 1
+
+            logger.debug(f"Using standardized headers: {standardized_headers}")
+
+            # Process each student row, starting from the appropriate row
+            for row in rows[start_row:]:
+                cells = row.select('td')
+                if not cells or len(cells) < 2:  # Skip rows with too few cells
                     continue
 
+                # Extract data from each cell
                 student_data = {}
-
-                # Extract data from cells based on column map
                 for i, cell in enumerate(cells):
-                    if i in column_map:
-                        field_name = column_map[i]
-                        student_data[field_name] = cell.get_text(strip=True)
+                    if i < len(standardized_headers):
+                        header = standardized_headers[i]
+                        value = cell.get_text(strip=True)
+                        if header:  # Always add the header
+                            student_data[header] = value if value else None
 
-                # If no Roll No was found but there's a cell with a roll number pattern, use that
+                # Skip rows that don't have a roll number
                 if 'Roll No' not in student_data or not student_data['Roll No']:
-                    roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
-                    for cell in cells:
-                        text = cell.get_text(strip=True)
-                        roll_match = roll_pattern.search(text)
-                        if roll_match:
-                            student_data['Roll No'] = roll_match.group(0)
+                    # Try to find a roll number pattern in any field
+                    roll_number = None
+                    for _, value in student_data.items():  # Use _ to indicate unused variable
+                        # Look for patterns like 21KB1A0501 (typical roll number format)
+                        if re.search(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}', value):
+                            roll_number = value
+                            student_data['Roll No'] = roll_number
                             break
 
-                # Skip rows without a roll number
-                if 'Roll No' not in student_data or not student_data['Roll No']:
-                    continue
+                    if not roll_number:
+                        continue
 
                 # Clean up roll number if it has a date in parentheses
                 if 'Roll No' in student_data and student_data['Roll No']:
@@ -1687,7 +1500,7 @@ class PersonalDetailsScraper:
                         roll_number = roll_number.split('(')[0].strip()
                         student_data['Roll No'] = roll_number
 
-                # Add metadata
+                # Add additional metadata
                 student_data['extracted_at'] = datetime.now().isoformat()
 
                 # Ensure all important fields are present, even if null
@@ -1696,13 +1509,24 @@ class PersonalDetailsScraper:
                     if field not in student_data:
                         student_data[field] = None
 
+                # Add the student data to the list
                 students.append(student_data)
 
-            logger.info(f"Extracted {len(students)} student records from table")
+                # Debug output for the first few students
+                if len(students) <= 3:
+                    logger.debug(f"Extracted student data: {student_data}")
+
+            if not students:
+                logger.warning("No student details found in the table")
+                return []
+
+            logger.info(f"Extracted personal details for {len(students)} students")
             return students
 
         except Exception as e:
-            logger.error(f"Error extracting data from table: {str(e)}")
+            logger.error(f"Error extracting personal details: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
 
     def save_to_csv(self, data: List[Dict[str, Any]], filename: str = "personal_details_data.csv",

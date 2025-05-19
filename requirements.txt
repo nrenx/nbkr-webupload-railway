@@ -6,8 +6,8 @@ lxml==4.9.3
 selenium>=4.10.0
 # webdriver-manager for managing Chrome drivers
 webdriver-manager>=4.0.0
-# Playwright for web scraping
-playwright>=1.40.0
+# Playwright is optional and not used in this deployment
+# playwright>=1.40.0
 # pandas for data export functionality
 pandas>=1.5.3
 
