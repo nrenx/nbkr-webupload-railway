@@ -978,20 +978,69 @@ class PersonalDetailsScraper:
                     "CSE_AIML": "33"
                 }
 
-                # Prepare form data
-                form_data = {
-                    'acadYear': academic_year,
-                    'yearSem': year_sem_mapping.get(year_of_study, year_of_study),
-                    'branch': branch_mapping.get(branch, branch),
-                    'section': section,
-                }
+                # Extract the form fields and their values
+                form_data = {}
 
-                # Add all checkboxes to the form data
-                for checkbox_name in checkbox_names:
-                    form_data[checkbox_name] = 'on'
+                # Find all select elements and their options
+                select_elements = form.find_all('select')
+                for select in select_elements:
+                    select_name = select.get('name')
+                    if not select_name:
+                        continue
 
-                # Add specific checkboxes for additional fields
-                if 'chkOterhFields[]' not in form_data:
+                    # Map our parameters to the form field names
+                    if 'year' in select_name.lower() or 'academic' in select_name.lower():
+                        # This is likely the academic year field
+                        form_data[select_name] = self.get_academic_year_value(select, academic_year)
+                        logger.debug(f"Selected academic year: {academic_year} -> {form_data[select_name]}")
+
+                    elif 'sem' in select_name.lower():
+                        # This is likely the semester field
+                        form_data[select_name] = self.get_semester_value(select, year_of_study)
+                        logger.debug(f"Selected semester: {year_of_study} -> {form_data[select_name]}")
+
+                    elif 'branch' in select_name.lower():
+                        # This is likely the branch field
+                        form_data[select_name] = self.get_branch_value(select, branch)
+                        logger.debug(f"Selected branch: {branch} -> {form_data[select_name]}")
+
+                    elif 'section' in select_name.lower():
+                        # This is likely the section field
+                        form_data[select_name] = self.get_section_value(select, section)
+                        logger.debug(f"Selected section: {section} -> {form_data[select_name]}")
+
+                    else:
+                        # For other fields, just use the first option value
+                        options = select.find_all('option')
+                        if options and options[0].get('value'):
+                            form_data[select_name] = options[0].get('value')
+
+                # Handle checkboxes properly
+                checkbox_elements = form.find_all('input', type='checkbox')
+                for checkbox in checkbox_elements:
+                    checkbox_name = checkbox.get('name')
+                    checkbox_value = checkbox.get('value')
+
+                    if not checkbox_name:
+                        continue
+
+                    # If it's a checkbox array (name ends with [])
+                    if checkbox_name.endswith('[]'):
+                        if checkbox_name not in form_data:
+                            form_data[checkbox_name] = []
+
+                        if checkbox_value:
+                            # Add the value to the array
+                            if isinstance(form_data[checkbox_name], list):
+                                form_data[checkbox_name].append(checkbox_value)
+                            else:
+                                form_data[checkbox_name] = [checkbox_value]
+                    else:
+                        # Regular checkbox
+                        form_data[checkbox_name] = 'on'
+
+                # Add specific checkboxes for additional fields if they're not already set
+                if 'chkOterhFields[]' not in form_data or not form_data['chkOterhFields[]']:
                     form_data['chkOterhFields[]'] = [
                         'Parent Name~fathersname',
                         'Parent Mobile~mobile',
@@ -999,16 +1048,25 @@ class PersonalDetailsScraper:
                         'Aadhaar~aadhaar'
                     ]
 
-                # Add the submit button value
-                form_data['submit'] = 'Get List of RollNos'
+                # Find all input elements
+                input_elements = form.find_all('input')
+                for input_elem in input_elements:
+                    input_type = input_elem.get('type', '').lower()
+                    input_name = input_elem.get('name')
 
-                # Extract all hidden fields from the form
-                hidden_inputs = form.select('input[type="hidden"]')
-                for hidden_input in hidden_inputs:
-                    name = hidden_input.get('name')
-                    value = hidden_input.get('value')
-                    if name and name not in form_data:
-                        form_data[name] = value
+                    if not input_name:
+                        continue
+
+                    if input_type == 'submit' and 'roll' in input_elem.get('value', '').lower():
+                        # Add the submit button value
+                        form_data[input_name] = input_elem.get('value', 'Get List of RollNos')
+                    elif input_type in ['text', 'hidden', 'date']:
+                        # Add other input values
+                        form_data[input_name] = input_elem.get('value', '')
+
+                # If no submit button was found, add it manually
+                if not any(k for k in form_data.keys() if k == 'submit'):
+                    form_data['submit'] = 'Get List of RollNos'
 
                 # Submit the form with retries
                 max_retries = 3
@@ -1033,7 +1091,13 @@ class PersonalDetailsScraper:
                             for table in tables:
                                 rows = table.select('tr')
                                 if len(rows) > 1:
-                                    has_data = True
+                                    # Additional check: make sure the rows contain actual data
+                                    for row in rows[1:]:  # Skip header row
+                                        cells = row.select('td')
+                                        if cells and any(cell.get_text(strip=True) for cell in cells):
+                                            has_data = True
+                                            break
+                                if has_data:
                                     break
 
                             if has_data:
@@ -1095,10 +1159,24 @@ class PersonalDetailsScraper:
                                 # Try with different form data combinations
                                 if retry_count == 0:
                                     # Try with original values instead of mapped values
-                                    form_data['yearSem'] = year_of_study
-                                    form_data['branch'] = branch
+                                    logger.info("Retrying with original values instead of mapped values")
+                                    # Re-extract form fields with different approach
+                                    for select in select_elements:
+                                        select_name = select.get('name')
+                                        if not select_name:
+                                            continue
+
+                                        if 'year' in select_name.lower() or 'academic' in select_name.lower():
+                                            form_data[select_name] = academic_year
+                                        elif 'sem' in select_name.lower():
+                                            form_data[select_name] = year_of_study
+                                        elif 'branch' in select_name.lower():
+                                            form_data[select_name] = branch
+                                        elif 'section' in select_name.lower():
+                                            form_data[select_name] = section
                                 elif retry_count == 1:
                                     # Try with a different submit button value
+                                    logger.info("Retrying with different submit button value")
                                     form_data['submit'] = 'Submit'
 
                                 retry_count += 1
@@ -1416,6 +1494,156 @@ class PersonalDetailsScraper:
 
 
 
+    def get_academic_year_value(self, select_element: BeautifulSoup, academic_year: str) -> str:
+        """
+        Get the value for the academic year select element.
+
+        Args:
+            select_element: The select element
+            academic_year: The academic year to select
+
+        Returns:
+            The value to use in the form
+        """
+        # Try to find an option with text or value matching the academic year
+        for option in select_element.find_all('option'):
+            option_text = option.text.strip()
+            option_value = option.get('value', '')
+
+            if academic_year in option_text or academic_year in option_value:
+                return option_value
+
+        # If no match found, return the first option value
+        first_option = select_element.find('option')
+        if first_option:
+            return first_option.get('value', '')
+
+        # If all else fails, return the academic year itself
+        return academic_year
+
+    def get_semester_value(self, select_element: BeautifulSoup, year_of_study: str) -> str:
+        """
+        Get the value for the semester select element.
+
+        Args:
+            select_element: The select element
+            year_of_study: The year of study to select
+
+        Returns:
+            The value to use in the form
+        """
+        # Map the year_of_study to the correct value
+        year_sem_mapping = {
+            "First": "01",
+            "First Yr - First Sem": "11",
+            "First Yr - Second Sem": "12",
+            "Second Yr - First Sem": "21",
+            "Second Yr - Second Sem": "22",
+            "Third Yr - First Sem": "31",
+            "Third Yr - Second Sem": "32",
+            "Final Yr - First Sem": "41",
+            "Final Yr - Second Sem": "42"
+        }
+
+        # Try to find an option with text matching the year_of_study
+        for option in select_element.find_all('option'):
+            option_text = option.text.strip()
+            option_value = option.get('value', '')
+
+            if year_of_study.lower() in option_text.lower():
+                return option_value
+
+        # If no match found, try to use the mapping
+        if year_of_study in year_sem_mapping:
+            code = year_sem_mapping[year_of_study]
+            for option in select_element.find_all('option'):
+                option_value = option.get('value', '')
+                if option_value == code:
+                    return option_value
+
+        # If no match found, return the first option value
+        first_option = select_element.find('option')
+        if first_option:
+            return first_option.get('value', '')
+
+        # If all else fails, use the mapping or the original value
+        return year_sem_mapping.get(year_of_study, year_of_study)
+
+    def get_branch_value(self, select_element: BeautifulSoup, branch: str) -> str:
+        """
+        Get the value for the branch select element.
+
+        Args:
+            select_element: The select element
+            branch: The branch to select
+
+        Returns:
+            The value to use in the form
+        """
+        # Map the branch to the correct value
+        branch_mapping = {
+            "MECH": "7",
+            "CSE": "5",
+            "ECE": "4",
+            "EEE": "2",
+            "CIVIL": "11",
+            "IT": "22",
+            "AI_DS": "23",
+            "CSE_DS": "32",
+            "CSE_AIML": "33"
+        }
+
+        # Try to find an option with text matching the branch
+        for option in select_element.find_all('option'):
+            option_text = option.text.strip()
+            option_value = option.get('value', '')
+
+            if branch.lower() in option_text.lower():
+                return option_value
+
+        # If no match found, try to use the mapping
+        if branch in branch_mapping:
+            code = branch_mapping[branch]
+            for option in select_element.find_all('option'):
+                option_value = option.get('value', '')
+                if option_value == code:
+                    return option_value
+
+        # If no match found, return the first option value
+        first_option = select_element.find('option')
+        if first_option:
+            return first_option.get('value', '')
+
+        # If all else fails, use the mapping or the original value
+        return branch_mapping.get(branch, branch)
+
+    def get_section_value(self, select_element: BeautifulSoup, section: str) -> str:
+        """
+        Get the value for the section select element.
+
+        Args:
+            select_element: The select element
+            section: The section to select
+
+        Returns:
+            The value to use in the form
+        """
+        # Try to find an option with text or value matching the section
+        for option in select_element.find_all('option'):
+            option_text = option.text.strip()
+            option_value = option.get('value', '')
+
+            if section == option_text or section == option_value:
+                return option_value
+
+        # If no match found, return the first option value
+        first_option = select_element.find('option')
+        if first_option:
+            return first_option.get('value', '')
+
+        # If all else fails, return the section itself
+        return section
+
     def convert_semester_to_year_of_study(self, semester: str) -> str:
         """
         Convert semester string to year-of-study format.
@@ -1656,11 +1884,9 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
             worker_logger.warning(f"Worker {worker_id}: Exceeded maximum runtime of {max_worker_runtime} seconds. Stopping.")
             break
 
-        # Check if we've seen too many empty combinations in a row
-        # We'll continue processing but will reset the counter when the branch changes
+        # Track empty combinations but don't skip anything
         if empty_combinations_in_a_row >= max_empty_combinations:
-            worker_logger.warning(f"Worker {worker_id}: Found {empty_combinations_in_a_row} empty combinations in a row for branch {current_branch}. Will skip until branch changes.")
-            # We don't break here, we'll continue and let the branch change reset the counter
+            worker_logger.info(f"Worker {worker_id}: Found {empty_combinations_in_a_row} empty combinations in a row for branch {current_branch}, but continuing anyway.")
 
         try:
             # Get the next combination from the queue (non-blocking)
@@ -1668,19 +1894,12 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
                 combination_index, combination = combination_queue.get(block=False)
                 academic_year, year_of_study, branch, section = combination
 
-                # Reset empty combinations counter when branch changes
+                # Reset empty combinations counter when branch changes, but don't skip anything
                 if branch != current_branch:
                     if empty_combinations_in_a_row > 0:
                         worker_logger.info(f"Worker {worker_id}: Changing branch from {current_branch} to {branch}, resetting empty combinations counter")
                         empty_combinations_in_a_row = 0
                     current_branch = branch
-                elif empty_combinations_in_a_row >= max_empty_combinations:
-                    # Skip this combination if we've seen too many empty combinations in a row for this branch
-                    worker_logger.warning(f"Worker {worker_id}: Skipping combination for branch {branch} due to too many empty combinations in a row")
-                    # Skip task_done for process mode as multiprocessing.Queue doesn't have this method
-                    if hasattr(combination_queue, 'task_done'):
-                        combination_queue.task_done()
-                    continue
             except queue.Empty:
                 # No more combinations to process
                 worker_logger.info(f"Worker {worker_id}: No more combinations to process. Exiting.")
@@ -1811,12 +2030,13 @@ def main():
     # Additional arguments for controlling the scraping process
     parser.add_argument('--max-combinations', type=int, default=0, help='Maximum number of combinations to try (0 for all)')
     parser.add_argument('--delay', type=float, default=1.0, help='Delay between requests in seconds')
-    parser.add_argument('--skip-empty', action='store_true', default=True, help='Skip combinations with no data (enabled by default)')
-    parser.add_argument('--no-skip-empty', dest='skip_empty', action='store_false', help='Do not skip combinations with no data')
+    # Keep these arguments for compatibility but they no longer affect behavior
+    parser.add_argument('--skip-empty', action='store_true', default=False, help='[DEPRECATED] This option no longer has any effect')
+    parser.add_argument('--no-skip-empty', dest='skip_empty', action='store_false', help='[DEPRECATED] This option no longer has any effect')
     parser.add_argument('--reverse', action='store_true', help='Reverse the order of combinations (oldest first)')
     parser.add_argument('--only-years', nargs='+', choices=DEFAULT_ACADEMIC_YEARS, help='Only scrape specific academic years')
     parser.add_argument('--only-semesters', nargs='+', choices=DEFAULT_SEMESTERS, help='Only scrape specific semesters')
-    parser.add_argument('--max-empty-combinations', type=int, default=5, help='Maximum number of empty combinations in a row before stopping')
+    parser.add_argument('--max-empty-combinations', type=int, default=5, help='Maximum number of empty combinations to track (for logging only)')
     parser.add_argument('--only-branches', nargs='+', choices=list(BRANCH_CODES.keys()), help='Only scrape specific branches')
     parser.add_argument('--only-sections', nargs='+', choices=DEFAULT_SECTIONS, help='Only scrape specific sections')
 
@@ -2095,20 +2315,16 @@ def main():
                     logger.warning(f"No student details found for {academic_year}, {year_of_study}, {branch}, {section}")
                     empty_combinations_in_a_row += 1
 
-                    # If we've seen too many empty combinations in a row, skip to next branch
-                    if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
-                        logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
-                        # Continue to the next iteration, which will be a different branch due to how combinations are generated
-                        continue
+                    # Empty combinations counter is tracked but no longer used to skip branches
+                    if empty_combinations_in_a_row >= max_empty_combinations:
+                        logger.info(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}, but continuing anyway.")
             else:
                 logger.warning(f"Failed to select form filters for {academic_year}, {year_of_study}, {branch}, {section}. Skipping.")
                 empty_combinations_in_a_row += 1
 
-                # If we've seen too many empty combinations in a row, stop
-                if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
-                    logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
-                    # Continue to the next iteration, which will be a different branch due to how combinations are generated
-                    continue
+                # Empty combinations counter is tracked but no longer used to skip branches
+                if empty_combinations_in_a_row >= max_empty_combinations:
+                    logger.info(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}, but continuing anyway.")
 
         # Print summary
         if total_students > 0:
