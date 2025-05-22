@@ -978,69 +978,20 @@ class PersonalDetailsScraper:
                     "CSE_AIML": "33"
                 }
 
-                # Extract the form fields and their values
-                form_data = {}
+                # Prepare form data
+                form_data = {
+                    'acadYear': academic_year,
+                    'yearSem': year_sem_mapping.get(year_of_study, year_of_study),
+                    'branch': branch_mapping.get(branch, branch),
+                    'section': section,
+                }
 
-                # Find all select elements and their options
-                select_elements = form.find_all('select')
-                for select in select_elements:
-                    select_name = select.get('name')
-                    if not select_name:
-                        continue
+                # Add all checkboxes to the form data
+                for checkbox_name in checkbox_names:
+                    form_data[checkbox_name] = 'on'
 
-                    # Map our parameters to the form field names
-                    if 'year' in select_name.lower() or 'academic' in select_name.lower():
-                        # This is likely the academic year field
-                        form_data[select_name] = self.get_academic_year_value(select, academic_year)
-                        logger.debug(f"Selected academic year: {academic_year} -> {form_data[select_name]}")
-
-                    elif 'sem' in select_name.lower():
-                        # This is likely the semester field
-                        form_data[select_name] = self.get_semester_value(select, year_of_study)
-                        logger.debug(f"Selected semester: {year_of_study} -> {form_data[select_name]}")
-
-                    elif 'branch' in select_name.lower():
-                        # This is likely the branch field
-                        form_data[select_name] = self.get_branch_value(select, branch)
-                        logger.debug(f"Selected branch: {branch} -> {form_data[select_name]}")
-
-                    elif 'section' in select_name.lower():
-                        # This is likely the section field
-                        form_data[select_name] = self.get_section_value(select, section)
-                        logger.debug(f"Selected section: {section} -> {form_data[select_name]}")
-
-                    else:
-                        # For other fields, just use the first option value
-                        options = select.find_all('option')
-                        if options and options[0].get('value'):
-                            form_data[select_name] = options[0].get('value')
-
-                # Handle checkboxes properly
-                checkbox_elements = form.find_all('input', type='checkbox')
-                for checkbox in checkbox_elements:
-                    checkbox_name = checkbox.get('name')
-                    checkbox_value = checkbox.get('value')
-
-                    if not checkbox_name:
-                        continue
-
-                    # If it's a checkbox array (name ends with [])
-                    if checkbox_name.endswith('[]'):
-                        if checkbox_name not in form_data:
-                            form_data[checkbox_name] = []
-
-                        if checkbox_value:
-                            # Add the value to the array
-                            if isinstance(form_data[checkbox_name], list):
-                                form_data[checkbox_name].append(checkbox_value)
-                            else:
-                                form_data[checkbox_name] = [checkbox_value]
-                    else:
-                        # Regular checkbox
-                        form_data[checkbox_name] = 'on'
-
-                # Add specific checkboxes for additional fields if they're not already set
-                if 'chkOterhFields[]' not in form_data or not form_data['chkOterhFields[]']:
+                # Add specific checkboxes for additional fields
+                if 'chkOterhFields[]' not in form_data:
                     form_data['chkOterhFields[]'] = [
                         'Parent Name~fathersname',
                         'Parent Mobile~mobile',
@@ -1048,25 +999,16 @@ class PersonalDetailsScraper:
                         'Aadhaar~aadhaar'
                     ]
 
-                # Find all input elements
-                input_elements = form.find_all('input')
-                for input_elem in input_elements:
-                    input_type = input_elem.get('type', '').lower()
-                    input_name = input_elem.get('name')
+                # Add the submit button value
+                form_data['submit'] = 'Get List of RollNos'
 
-                    if not input_name:
-                        continue
-
-                    if input_type == 'submit' and 'roll' in input_elem.get('value', '').lower():
-                        # Add the submit button value
-                        form_data[input_name] = input_elem.get('value', 'Get List of RollNos')
-                    elif input_type in ['text', 'hidden', 'date']:
-                        # Add other input values
-                        form_data[input_name] = input_elem.get('value', '')
-
-                # If no submit button was found, add it manually
-                if not any(k for k in form_data.keys() if k == 'submit'):
-                    form_data['submit'] = 'Get List of RollNos'
+                # Extract all hidden fields from the form
+                hidden_inputs = form.select('input[type="hidden"]')
+                for hidden_input in hidden_inputs:
+                    name = hidden_input.get('name')
+                    value = hidden_input.get('value')
+                    if name and name not in form_data:
+                        form_data[name] = value
 
                 # Submit the form with retries
                 max_retries = 3
@@ -1083,107 +1025,64 @@ class PersonalDetailsScraper:
                         # Parse the response
                         result_soup = BeautifulSoup(response.text, 'html.parser')
 
-                        # Check if the form submission was successful
-                        # First, check for any error messages
-                        error_messages = result_soup.select('.error, .alert, .warning')
-                        if error_messages:
-                            error_text = ' '.join([msg.get_text(strip=True) for msg in error_messages])
-                            logger.warning(f"Form submission returned error: {error_text}")
-                            # Continue with the next attempt
-                            continue
-
-                        # Look for tables with data
+                        # Check if the form submission was successful by looking for tables
                         tables = result_soup.select('table')
-                        logger.debug(f"Found {len(tables)} tables in response")
-
-                        # Debug: Print the HTML content to help diagnose issues
-                        html_content = str(result_soup)
-                        logger.debug(f"Response HTML length: {len(html_content)} characters")
-                        if len(html_content) < 1000:  # Only log small responses to avoid flooding logs
-                            logger.debug(f"Response HTML: {html_content}")
-
-                        # Check if there's any content that might indicate success even without tables
-                        # Some responses might have data in divs or other elements
-                        has_data = False
-
-                        # Check tables first
                         if tables:
-                            for i, table in enumerate(tables):
+                            # Check if any table has more than 1 row (header + at least one data row)
+                            has_data = False
+                            for table in tables:
                                 rows = table.select('tr')
-                                logger.debug(f"Table {i+1} has {len(rows)} rows")
-
                                 if len(rows) > 1:
-                                    # Additional check: make sure the rows contain actual data
-                                    for row in rows[1:]:  # Skip header row
-                                        cells = row.select('td')
-                                        if cells and any(cell.get_text(strip=True) for cell in cells):
-                                            logger.debug(f"Found data in table {i+1}, row {rows.index(row)+1}")
-                                            has_data = True
-                                            break
-                                if has_data:
+                                    has_data = True
                                     break
 
-                        # If no tables with data, look for other indicators of success
-                        if not has_data:
-                            # Check for divs with data
-                            data_divs = result_soup.select('div.data, div.content, div.result')
-                            if data_divs and any(div.get_text(strip=True) for div in data_divs):
-                                logger.debug("Found data in divs")
-                                has_data = True
+                            if has_data:
+                                logger.info("Form submitted successfully using requests - found tables with data")
+                                return result_soup
+                            else:
+                                logger.warning("Form submitted but no data rows found in tables")
+                                no_data_count += 1
 
-                            # Check for any roll number patterns in the page
-                            roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
-                            if roll_pattern.search(html_content):
-                                logger.debug("Found roll number pattern in page")
-                                has_data = True
-
-                        if has_data:
-                            logger.info("Form submitted successfully using requests - found data in response")
-                            return result_soup
+                                # If we've tried multiple times with no data, assume there's no data for this combination
+                                if no_data_count >= max_no_data_retries:
+                                    logger.warning(f"No data found after {no_data_count} attempts. Assuming no data exists for this combination.")
+                                    # Return None to indicate no data for this combination
+                                    return None
                         else:
-                            logger.warning("Form submitted but no data found in response")
-                            no_data_count += 1
+                            # Check if we're on the login page and need to re-authenticate
+                            if "login" in response.url.lower() or "login" in result_soup.text.lower():
+                                logger.warning("Redirected to login page, attempting to re-authenticate")
+                                self.logged_in = False
+                                if self.authenticate():
+                                    # Try again with a fresh page
+                                    soup = self.navigate_to_personal_details_page()
+                                    if soup:
+                                        # Update the form with the new page
+                                        form = soup.select_one('form')
+                                        if form:
+                                            form_action = form.get('action', '')
+                                            # Make sure the form URL is absolute
+                                            if not form_action:
+                                                form_url = PERSONAL_DETAILS_URL
+                                            elif form_action.startswith('http'):
+                                                form_url = form_action
+                                            else:
+                                                # Handle relative URLs by joining with the base URL
+                                                from urllib.parse import urljoin
+                                                base_url = "http://103.203.175.90:94/attendance/"
+                                                form_url = urljoin(base_url, form_action)
+                                                logger.info(f"Converted relative URL '{form_action}' to absolute URL '{form_url}'")
 
-                            # If we've tried multiple times with no data, assume there's no data for this combination
-                            if no_data_count >= max_no_data_retries:
-                                logger.warning(f"No data found after {no_data_count} attempts. Assuming no data exists for this combination.")
-                                # Return an empty BeautifulSoup object instead of None to indicate no data but successful form submission
-                                return BeautifulSoup("<html><body><table></table></body></html>", 'html.parser')
+                                            # Extract all hidden fields from the new form
+                                            hidden_inputs = form.select('input[type="hidden"]')
+                                            for hidden_input in hidden_inputs:
+                                                name = hidden_input.get('name')
+                                                value = hidden_input.get('value')
+                                                if name:
+                                                    form_data[name] = value
 
-                        # Check if we're on the login page and need to re-authenticate
-                        if "login" in response.url.lower() or "login" in result_soup.text.lower():
-                            logger.warning("Redirected to login page, attempting to re-authenticate")
-                            self.logged_in = False
-                            if self.authenticate():
-                                # Try again with a fresh page
-                                soup = self.navigate_to_personal_details_page()
-                                if soup:
-                                    # Update the form with the new page
-                                    form = soup.select_one('form')
-                                    if form:
-                                        form_action = form.get('action', '')
-                                        # Make sure the form URL is absolute
-                                        if not form_action:
-                                            form_url = PERSONAL_DETAILS_URL
-                                        elif form_action.startswith('http'):
-                                            form_url = form_action
-                                        else:
-                                            # Handle relative URLs by joining with the base URL
-                                            from urllib.parse import urljoin
-                                            base_url = "http://103.203.175.90:94/attendance/"
-                                            form_url = urljoin(base_url, form_action)
-                                            logger.info(f"Converted relative URL '{form_action}' to absolute URL '{form_url}'")
-
-                                        # Extract all hidden fields from the new form
-                                        hidden_inputs = form.select('input[type="hidden"]')
-                                        for hidden_input in hidden_inputs:
-                                            name = hidden_input.get('name')
-                                            value = hidden_input.get('value')
-                                            if name:
-                                                form_data[name] = value
-
-                                    retry_count += 1
-                                    continue  # Retry the form submission
+                                        retry_count += 1
+                                        continue  # Retry the form submission
 
                             logger.warning("Form submission failed - no tables found in the response")
 
@@ -1196,48 +1095,30 @@ class PersonalDetailsScraper:
                                 # Try with different form data combinations
                                 if retry_count == 0:
                                     # Try with original values instead of mapped values
-                                    logger.info("Retrying with original values instead of mapped values")
-                                    # Re-extract form fields with different approach
-                                    for select in select_elements:
-                                        select_name = select.get('name')
-                                        if not select_name:
-                                            continue
-
-                                        if 'year' in select_name.lower() or 'academic' in select_name.lower():
-                                            form_data[select_name] = academic_year
-                                        elif 'sem' in select_name.lower():
-                                            form_data[select_name] = year_of_study
-                                        elif 'branch' in select_name.lower():
-                                            form_data[select_name] = branch
-                                        elif 'section' in select_name.lower():
-                                            form_data[select_name] = section
+                                    form_data['yearSem'] = year_of_study
+                                    form_data['branch'] = branch
                                 elif retry_count == 1:
                                     # Try with a different submit button value
-                                    logger.info("Retrying with different submit button value")
                                     form_data['submit'] = 'Submit'
 
                                 retry_count += 1
                                 continue
 
-                            # Return an empty BeautifulSoup object instead of None to indicate no data but successful form submission
-                            return BeautifulSoup("<html><body><table></table></body></html>", 'html.parser')
+                            return None
                     except Exception as e:
                         retry_count += 1
                         if retry_count >= max_retries:
                             logger.error(f"Error submitting form after {max_retries} retries: {e}")
-                            # Return an empty BeautifulSoup object instead of None to indicate no data but successful form submission
-                            return BeautifulSoup("<html><body><table></table></body></html>", 'html.parser')
+                            return None
                         logger.warning(f"Error submitting form (attempt {retry_count}/{max_retries}): {e}")
                         time.sleep(2)  # Wait before retrying
 
                 # If we get here, all retries failed
-                # Return an empty BeautifulSoup object instead of None to indicate no data but successful form submission
-                return BeautifulSoup("<html><body><table></table></body></html>", 'html.parser')
+                return None
 
         except Exception as e:
             logger.error(f"Error submitting form: {e}")
-            # Return an empty BeautifulSoup object instead of None to indicate no data but successful form submission
-            return BeautifulSoup("<html><body><table></table></body></html>", 'html.parser')
+            return None
 
     def extract_personal_details(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
         """
@@ -1254,25 +1135,10 @@ class PersonalDetailsScraper:
             return []
 
         try:
-            # Log the entire HTML for debugging (only in development)
-            html_content = str(soup)
-            logger.debug(f"HTML content length: {len(html_content)} characters")
-
-            # Look for roll number patterns in the HTML to confirm data exists
-            roll_pattern = re.compile(r'\d{2}[A-Z]{2}\d{1}[A-Z]\d{4}')  # Common roll number format
-            roll_matches = roll_pattern.findall(html_content)
-            if roll_matches:
-                logger.debug(f"Found {len(roll_matches)} roll number patterns in the HTML: {roll_matches[:5]}")
-
             # Find all tables in the page
             tables = soup.select('table')
             if not tables:
                 logger.warning("No tables found in the page")
-
-                # If no tables but we found roll numbers, try to extract from other elements
-                if roll_matches:
-                    logger.info(f"No tables found but detected {len(roll_matches)} roll numbers. Trying alternative extraction.")
-                    return self.extract_from_non_table_elements(soup, roll_matches)
                 return []
 
             # Debug: Print information about each table
@@ -1286,69 +1152,40 @@ class PersonalDetailsScraper:
                     if cells:
                         logger.debug(f"First cell text: {cells[0].get_text(strip=True)}")
 
-                    # Print all cell texts from the first row to help identify the table
-                    cell_texts = [cell.get_text(strip=True) for cell in cells]
-                    logger.debug(f"First row texts: {cell_texts}")
-
                 # Check for links in the table
                 links = table.select('a')
                 logger.debug(f"Table {i+1} has {len(links)} links")
                 if links:
                     logger.debug(f"First link text: {links[0].get_text(strip=True)}")
 
-                    # Check if links contain roll numbers
-                    link_texts = [link.get_text(strip=True) for link in links[:5]]
-                    logger.debug(f"Sample link texts: {link_texts}")
-
-                    # If links contain roll numbers, this might be the student table
-                    if any(roll_pattern.search(link_text) for link_text in link_texts):
-                        logger.debug(f"Table {i+1} contains links with roll numbers")
-
             # The personal details page can have different structures
             # 1. It might have a table with roll numbers as links, and clicking on each link shows the details
             # 2. It might have a table with student details directly in the rows
-            # 3. It might have roll numbers in other elements outside tables
 
             # First, try to find the main student details table
             # This is typically the largest table with student data
             student_table = None
             max_rows = 0
 
-            # Try multiple approaches to find the student table
+            for table in tables:
+                rows = table.select('tr')
+                if len(rows) > max_rows:
+                    # Check if this looks like a student table (has roll numbers)
+                    if len(rows) > 1:  # At least a header row and one data row
+                        cells = rows[1].select('td')  # Check the first data row
+                        if cells and len(cells) > 1:
+                            # Check if any cell contains text that looks like a roll number
+                            # Roll numbers typically contain digits and possibly letters
+                            for cell in cells:
+                                text = cell.get_text(strip=True)
+                                if text and any(c.isdigit() for c in text):
+                                    student_table = table
+                                    max_rows = len(rows)
+                                    break
 
-            # Approach 1: Look for tables with roll number patterns
-            for i, table in enumerate(tables):
-                html = str(table)
-                if roll_pattern.search(html):
-                    logger.debug(f"Table {i+1} contains roll number patterns")
-                    rows = table.select('tr')
-                    if len(rows) > max_rows:
-                        student_table = table
-                        max_rows = len(rows)
-                        logger.debug(f"Selected table {i+1} as student table (approach 1)")
-
-            # Approach 2: Look for tables with many rows
             if not student_table:
-                for i, table in enumerate(tables):
-                    rows = table.select('tr')
-                    if len(rows) > max_rows:
-                        # Check if this looks like a student table (has roll numbers)
-                        if len(rows) > 1:  # At least a header row and one data row
-                            cells = rows[1].select('td')  # Check the first data row
-                            if cells and len(cells) > 1:
-                                # Check if any cell contains text that looks like a roll number
-                                # Roll numbers typically contain digits and possibly letters
-                                for cell in cells:
-                                    text = cell.get_text(strip=True)
-                                    if text and any(c.isdigit() for c in text):
-                                        student_table = table
-                                        max_rows = len(rows)
-                                        logger.debug(f"Selected table {i+1} as student table (approach 2)")
-                                        break
-
-            # Approach 3: Look for tables with specific headers
-            if not student_table:
-                for i, table in enumerate(tables):
+                # Try a different approach - look for tables with specific headers
+                for table in tables:
                     rows = table.select('tr')
                     if rows:
                         header_row = rows[0]
@@ -1356,28 +1193,12 @@ class PersonalDetailsScraper:
                         header_texts = [cell.get_text(strip=True).lower() for cell in header_cells]
 
                         # Check for common headers in student tables
-                        if any(text in ['roll no', 'rollno', 'roll number', 'student id', 'sno', 's.no', 'slno'] for text in header_texts):
+                        if any(text in ['roll no', 'rollno', 'roll number', 'student id'] for text in header_texts):
                             student_table = table
-                            logger.debug(f"Selected table {i+1} as student table (approach 3)")
                             break
-
-            # Approach 4: If all else fails, just use the largest table
-            if not student_table and tables:
-                # Find the table with the most rows
-                for i, table in enumerate(tables):
-                    rows = table.select('tr')
-                    if len(rows) > max_rows:
-                        max_rows = len(rows)
-                        student_table = table
-                        logger.debug(f"Selected table {i+1} as student table (approach 4 - largest table)")
 
             if not student_table:
                 logger.warning("No student details table found")
-
-                # If no student table but we found roll numbers, try to extract from other elements
-                if roll_matches:
-                    logger.info(f"No student table found but detected {len(roll_matches)} roll numbers. Trying alternative extraction.")
-                    return self.extract_from_non_table_elements(soup, roll_matches)
                 return []
 
             # Extract student details from the table
@@ -1594,239 +1415,6 @@ class PersonalDetailsScraper:
             return False
 
 
-
-    def get_academic_year_value(self, select_element: BeautifulSoup, academic_year: str) -> str:
-        """
-        Get the value for the academic year select element.
-
-        Args:
-            select_element: The select element
-            academic_year: The academic year to select
-
-        Returns:
-            The value to use in the form
-        """
-        # Try to find an option with text or value matching the academic year
-        for option in select_element.find_all('option'):
-            option_text = option.text.strip()
-            option_value = option.get('value', '')
-
-            if academic_year in option_text or academic_year in option_value:
-                return option_value
-
-        # If no match found, return the first option value
-        first_option = select_element.find('option')
-        if first_option:
-            return first_option.get('value', '')
-
-        # If all else fails, return the academic year itself
-        return academic_year
-
-    def get_semester_value(self, select_element: BeautifulSoup, year_of_study: str) -> str:
-        """
-        Get the value for the semester select element.
-
-        Args:
-            select_element: The select element
-            year_of_study: The year of study to select
-
-        Returns:
-            The value to use in the form
-        """
-        # Map the year_of_study to the correct value
-        year_sem_mapping = {
-            "First": "01",
-            "First Yr - First Sem": "11",
-            "First Yr - Second Sem": "12",
-            "Second Yr - First Sem": "21",
-            "Second Yr - Second Sem": "22",
-            "Third Yr - First Sem": "31",
-            "Third Yr - Second Sem": "32",
-            "Final Yr - First Sem": "41",
-            "Final Yr - Second Sem": "42"
-        }
-
-        # Try to find an option with text matching the year_of_study
-        for option in select_element.find_all('option'):
-            option_text = option.text.strip()
-            option_value = option.get('value', '')
-
-            if year_of_study.lower() in option_text.lower():
-                return option_value
-
-        # If no match found, try to use the mapping
-        if year_of_study in year_sem_mapping:
-            code = year_sem_mapping[year_of_study]
-            for option in select_element.find_all('option'):
-                option_value = option.get('value', '')
-                if option_value == code:
-                    return option_value
-
-        # If no match found, return the first option value
-        first_option = select_element.find('option')
-        if first_option:
-            return first_option.get('value', '')
-
-        # If all else fails, use the mapping or the original value
-        return year_sem_mapping.get(year_of_study, year_of_study)
-
-    def get_branch_value(self, select_element: BeautifulSoup, branch: str) -> str:
-        """
-        Get the value for the branch select element.
-
-        Args:
-            select_element: The select element
-            branch: The branch to select
-
-        Returns:
-            The value to use in the form
-        """
-        # Map the branch to the correct value
-        branch_mapping = {
-            "MECH": "7",
-            "CSE": "5",
-            "ECE": "4",
-            "EEE": "2",
-            "CIVIL": "11",
-            "IT": "22",
-            "AI_DS": "23",
-            "CSE_DS": "32",
-            "CSE_AIML": "33"
-        }
-
-        # Try to find an option with text matching the branch
-        for option in select_element.find_all('option'):
-            option_text = option.text.strip()
-            option_value = option.get('value', '')
-
-            if branch.lower() in option_text.lower():
-                return option_value
-
-        # If no match found, try to use the mapping
-        if branch in branch_mapping:
-            code = branch_mapping[branch]
-            for option in select_element.find_all('option'):
-                option_value = option.get('value', '')
-                if option_value == code:
-                    return option_value
-
-        # If no match found, return the first option value
-        first_option = select_element.find('option')
-        if first_option:
-            return first_option.get('value', '')
-
-        # If all else fails, use the mapping or the original value
-        return branch_mapping.get(branch, branch)
-
-    def get_section_value(self, select_element: BeautifulSoup, section: str) -> str:
-        """
-        Get the value for the section select element.
-
-        Args:
-            select_element: The select element
-            section: The section to select
-
-        Returns:
-            The value to use in the form
-        """
-        # Try to find an option with text or value matching the section
-        for option in select_element.find_all('option'):
-            option_text = option.text.strip()
-            option_value = option.get('value', '')
-
-            if section == option_text or section == option_value:
-                return option_value
-
-        # If no match found, return the first option value
-        first_option = select_element.find('option')
-        if first_option:
-            return first_option.get('value', '')
-
-        # If all else fails, return the section itself
-        return section
-
-    def extract_from_non_table_elements(self, soup: BeautifulSoup, roll_matches: List[str]) -> List[Dict[str, Any]]:
-        """
-        Extract student details from non-table elements when tables are not available or don't contain the data.
-
-        Args:
-            soup: BeautifulSoup object of the page
-            roll_matches: List of roll numbers found in the page
-
-        Returns:
-            List of dictionaries containing personal details
-        """
-        logger.info("Attempting to extract student details from non-table elements")
-        students = []
-
-        # Create a set of unique roll numbers
-        unique_rolls = set(roll_matches)
-        logger.debug(f"Found {len(unique_rolls)} unique roll numbers")
-
-        # Look for elements that might contain student data
-        for roll_number in unique_rolls:
-            # Try to find elements near the roll number
-            # First, find all elements containing this roll number
-            elements_with_roll = []
-            for element in soup.find_all(['div', 'p', 'span', 'td', 'li']):
-                if roll_number in element.get_text():
-                    elements_with_roll.append(element)
-
-            if not elements_with_roll:
-                continue
-
-            logger.debug(f"Found {len(elements_with_roll)} elements containing roll number {roll_number}")
-
-            # Extract student data from these elements
-            student_data = {'Roll No': roll_number}
-
-            # Look for common patterns in the text around the roll number
-            for element in elements_with_roll:
-                text = element.get_text(strip=True)
-
-                # Look for name pattern (usually after roll number)
-                name_match = re.search(rf'{roll_number}\s*[-:,]?\s*([A-Za-z\s.]+)', text)
-                if name_match and 'Name' not in student_data:
-                    name = name_match.group(1).strip()
-                    if len(name) > 2:  # Avoid capturing single characters
-                        student_data['Name'] = name
-
-                # Look for parent/father name
-                father_match = re.search(r'[Ff]ather(?:\'s)?\s*[Nn]ame\s*[-:,]?\s*([A-Za-z\s.]+)', text)
-                if father_match and 'Father Name' not in student_data:
-                    student_data['Father Name'] = father_match.group(1).strip()
-
-                # Look for mobile numbers
-                mobile_matches = re.findall(r'(?:Mobile|Phone|Contact)(?:\s*\d)?\s*[-:,]?\s*(\d{10})', text)
-                if mobile_matches:
-                    if 'Student Mobile' not in student_data and len(mobile_matches) > 0:
-                        student_data['Student Mobile'] = mobile_matches[0]
-                    if 'Parent Mobile' not in student_data and len(mobile_matches) > 1:
-                        student_data['Parent Mobile'] = mobile_matches[1]
-
-                # Look for Aadhaar number
-                aadhaar_match = re.search(r'[Aa]adhaar\s*[-:,]?\s*(\d{4}\s*\d{4}\s*\d{4}|\d{12})', text)
-                if aadhaar_match and 'Aadhaar' not in student_data:
-                    student_data['Aadhaar'] = aadhaar_match.group(1).strip()
-
-            # Add metadata
-            student_data['extracted_at'] = datetime.now().isoformat()
-
-            # Ensure all important fields are present, even if null
-            important_fields = ['Roll No', 'Name', 'Father Name', 'Parent Mobile', 'Student Mobile', 'Aadhaar']
-            for field in important_fields:
-                if field not in student_data:
-                    student_data[field] = None
-
-            # Add the student data to the list
-            students.append(student_data)
-
-            # Debug output for the first few students
-            if len(students) <= 3:
-                logger.debug(f"Extracted student data from non-table elements: {student_data}")
-
-        logger.info(f"Extracted personal details for {len(students)} students from non-table elements")
-        return students
 
     def convert_semester_to_year_of_study(self, semester: str) -> str:
         """
@@ -2061,7 +1649,6 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
     empty_combinations_in_a_row = 0
     max_empty_combinations = args.max_empty_combinations  # Use the command line argument
     current_branch = None  # Track the current branch to reset counter when branch changes
-    current_branch_to_skip = None  # Track which branch to skip if too many empty combinations
 
     while True:
         # Check if we've been running too long
@@ -2069,9 +1656,11 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
             worker_logger.warning(f"Worker {worker_id}: Exceeded maximum runtime of {max_worker_runtime} seconds. Stopping.")
             break
 
-        # Track empty combinations but don't skip anything
+        # Check if we've seen too many empty combinations in a row
+        # We'll continue processing but will reset the counter when the branch changes
         if empty_combinations_in_a_row >= max_empty_combinations:
-            worker_logger.info(f"Worker {worker_id}: Found {empty_combinations_in_a_row} empty combinations in a row for branch {current_branch}, but continuing anyway.")
+            worker_logger.warning(f"Worker {worker_id}: Found {empty_combinations_in_a_row} empty combinations in a row for branch {current_branch}. Will skip until branch changes.")
+            # We don't break here, we'll continue and let the branch change reset the counter
 
         try:
             # Get the next combination from the queue (non-blocking)
@@ -2085,12 +1674,9 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
                         worker_logger.info(f"Worker {worker_id}: Changing branch from {current_branch} to {branch}, resetting empty combinations counter")
                         empty_combinations_in_a_row = 0
                     current_branch = branch
-                    # Reset the branch to skip flag
-                    current_branch_to_skip = None
-
-                # Skip this branch if we've seen too many empty combinations
-                if current_branch_to_skip and current_branch == current_branch_to_skip:
-                    worker_logger.info(f"Worker {worker_id}: Skipping combination for branch {branch} due to too many empty combinations")
+                elif empty_combinations_in_a_row >= max_empty_combinations:
+                    # Skip this combination if we've seen too many empty combinations in a row for this branch
+                    worker_logger.warning(f"Worker {worker_id}: Skipping combination for branch {branch} due to too many empty combinations in a row")
                     # Skip task_done for process mode as multiprocessing.Queue doesn't have this method
                     if hasattr(combination_queue, 'task_done'):
                         combination_queue.task_done()
@@ -2126,20 +1712,12 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
 
             # Select form filters and submit
             result_soup = scraper.select_form_filters(academic_year, year_of_study, branch, section)
-            # This should never happen now that we always return a BeautifulSoup object
             if not result_soup:
                 worker_logger.warning(f"Worker {worker_id}: Failed to get results for {academic_year}, {year_of_study}, {branch}, {section}")
                 result_queue.put((worker_id, "no_results", combination))
                 # Increment the empty combinations counter
                 empty_combinations_in_a_row += 1
                 worker_logger.warning(f"Worker {worker_id}: Empty combinations in a row: {empty_combinations_in_a_row}/{max_empty_combinations}")
-
-                # If we've seen too many empty combinations in a row, stop processing this branch
-                if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
-                    worker_logger.warning(f"Worker {worker_id}: Found {empty_combinations_in_a_row} empty combinations in a row. Skipping remaining combinations for this branch.")
-                    # Skip to the next branch by setting a flag
-                    current_branch_to_skip = current_branch
-
                 # Skip task_done for process mode as multiprocessing.Queue doesn't have this method
                 if hasattr(combination_queue, 'task_done'):
                     combination_queue.task_done()
@@ -2158,13 +1736,6 @@ def worker_function(worker_id: int, combination_queue: queue.Queue, result_queue
                 # Increment the empty combinations counter
                 empty_combinations_in_a_row += 1
                 worker_logger.warning(f"Worker {worker_id}: Empty combinations in a row: {empty_combinations_in_a_row}/{max_empty_combinations}")
-
-                # If we've seen too many empty combinations in a row, stop processing this branch
-                if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
-                    worker_logger.warning(f"Worker {worker_id}: Found {empty_combinations_in_a_row} empty combinations in a row. Skipping remaining combinations for this branch.")
-                    # Skip to the next branch by setting a flag
-                    current_branch_to_skip = current_branch
-
                 # Skip task_done for process mode as multiprocessing.Queue doesn't have this method
                 if hasattr(combination_queue, 'task_done'):
                     combination_queue.task_done()
@@ -2240,13 +1811,12 @@ def main():
     # Additional arguments for controlling the scraping process
     parser.add_argument('--max-combinations', type=int, default=0, help='Maximum number of combinations to try (0 for all)')
     parser.add_argument('--delay', type=float, default=1.0, help='Delay between requests in seconds')
-    # Arguments for controlling empty combinations behavior
-    parser.add_argument('--skip-empty', action='store_true', help='Skip combinations with no data')
+    parser.add_argument('--skip-empty', action='store_true', default=True, help='Skip combinations with no data (enabled by default)')
     parser.add_argument('--no-skip-empty', dest='skip_empty', action='store_false', help='Do not skip combinations with no data')
     parser.add_argument('--reverse', action='store_true', help='Reverse the order of combinations (oldest first)')
     parser.add_argument('--only-years', nargs='+', choices=DEFAULT_ACADEMIC_YEARS, help='Only scrape specific academic years')
     parser.add_argument('--only-semesters', nargs='+', choices=DEFAULT_SEMESTERS, help='Only scrape specific semesters')
-    parser.add_argument('--max-empty-combinations', type=int, default=5, help='Maximum number of empty combinations to track (for logging only)')
+    parser.add_argument('--max-empty-combinations', type=int, default=5, help='Maximum number of empty combinations in a row before stopping')
     parser.add_argument('--only-branches', nargs='+', choices=list(BRANCH_CODES.keys()), help='Only scrape specific branches')
     parser.add_argument('--only-sections', nargs='+', choices=DEFAULT_SECTIONS, help='Only scrape specific sections')
 
@@ -2525,27 +2095,20 @@ def main():
                     logger.warning(f"No student details found for {academic_year}, {year_of_study}, {branch}, {section}")
                     empty_combinations_in_a_row += 1
 
-                    # Check if we should skip empty combinations
-                    if empty_combinations_in_a_row >= max_empty_combinations:
-                        if args.skip_empty:
-                            logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
-                            # Skip to the next branch
-                            break
-                        else:
-                            logger.info(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}, but continuing anyway.")
+                    # If we've seen too many empty combinations in a row, skip to next branch
+                    if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
+                        logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
+                        # Continue to the next iteration, which will be a different branch due to how combinations are generated
+                        continue
             else:
-                # This should never happen now that we always return a BeautifulSoup object
-                logger.warning(f"Failed to select form filters for {academic_year}, {year_of_study}, {branch}, {section}. Continuing anyway.")
+                logger.warning(f"Failed to select form filters for {academic_year}, {year_of_study}, {branch}, {section}. Skipping.")
                 empty_combinations_in_a_row += 1
 
-                # Check if we should skip empty combinations
-                if empty_combinations_in_a_row >= max_empty_combinations:
-                    if args.skip_empty:
-                        logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
-                        # Skip to the next branch
-                        break
-                    else:
-                        logger.info(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}, but continuing anyway.")
+                # If we've seen too many empty combinations in a row, stop
+                if empty_combinations_in_a_row >= max_empty_combinations and args.skip_empty:
+                    logger.warning(f"Found {empty_combinations_in_a_row} empty combinations in a row for branch {branch}. Skipping remaining combinations for this branch.")
+                    # Continue to the next iteration, which will be a different branch due to how combinations are generated
+                    continue
 
         # Print summary
         if total_students > 0:
